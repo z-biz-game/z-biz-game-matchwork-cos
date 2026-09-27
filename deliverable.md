@@ -50,6 +50,14 @@ README.md DESIGN.md deliverable.md
 零依赖、0 个二进制资产、core purity clean、无幽灵导出。
 发布 sha `87eb738`，CI trigger `32099eb`。
 
+**线上 CI 的浏览器 job 目前是红的**（check-runs 实测：`deploy=success | build=success | unit=success | browser=failure`）。
+失败断言只有第一条：`the canvas is laid out, not the unstyled 300x150 default`，
+runner 上报回 `{"css":[577,300],"backing":[592,300],"dpr":1}` —— canvas 的 CSS 高度仍是未布局的默认 300，
+且 dpr=1。本机的 147/0 与 `=== ALL GREEN ===` 是**本机视口**（更高、dpr 2）下的结果，
+所以这一节的数字应当读作"本机全绿、GitHub runner 未通过"，修复方向见交付侧工具任务。
+上一版会话中断前留下的"发现第二个更大的浏览器层 bug"这条未确认记录，**与此是同一件事**：
+它现在有了可复现的失败断言，不再是猜测。
+
 需要如实记录的一点：本报告初稿在写这一节时门禁还没跑完，所以当时故意**不写**浏览器数字；
 上面的 147/0 是门禁实跑之后回填的实测值，而不是推测。上一条会话中断前留下的
 "发现第二个更大的浏览器层 bug"记录，在这次实跑里**没有表现为任何失败断言**——
