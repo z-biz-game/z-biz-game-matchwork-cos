@@ -1,0 +1,64 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="theme-color" content="#141210">
+<meta name="description" content="火柴等式：搬 N 根火柴让等式成立。每题的最少搬数都是穷举量出来的，等号两根锁死。">
+<link rel="icon" href="data:,">
+<title>火柴等式 · MATCHWORK</title>
+<link rel="stylesheet" href="css/game.css">
+</head>
+<body>
+<header class="topbar">
+  <h1 class="brand"><span class="brand-mark">≡</span>火柴等式<small>MATCHWORK</small></h1>
+  <nav class="modes" id="modes" aria-label="模式">
+    <button type="button" data-mode="campaign">战役</button>
+    <button type="button" data-mode="daily">每日</button>
+    <button type="button" data-mode="random">随机</button>
+  </nav>
+  <p class="totals" id="totals"></p>
+</header>
+
+<main class="stage">
+  <section class="board">
+    <p class="equation" id="equation"></p>
+    <canvas id="lot" aria-label="火柴等式版面"></canvas>
+    <p class="hint-line" id="hintline"></p>
+    <div class="curtain" id="curtain" hidden>
+      <div class="curtain-card">
+        <p class="stars" id="stars"></p>
+        <h2 id="verdict"></h2>
+        <p class="tally" id="tally"></p>
+        <div class="curtain-actions">
+          <button type="button" id="again">再来一次</button>
+          <button type="button" id="next" class="primary">下一题</button>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <aside class="panel">
+    <p class="crumbs" id="crumbs"></p>
+    <dl class="readout" id="readout"></dl>
+    <div class="controls">
+      <button type="button" id="undo">撤销</button>
+      <button type="button" id="hint">提示</button>
+      <button type="button" id="restart">重开</button>
+      <button type="button" id="share">分享</button>
+    </div>
+    <div class="shelf" id="shelf"></div>
+    <details class="about">
+      <summary>这个「最少搬数」凭什么可信</summary>
+      <p>一手搬法 = 拿走一根 + 放下一根，所以全盘火柴总数不变，可选动作恰好是 <code>{亮着的段} × {灭着的段}</code> 这个笛卡尔积。par=1 是把这层积全试一遍；par≥2 是沿着「合法版面」图逐层穷举，直到把整个连通分量走完。两条路都跑完才印数字，跑不完就不印数字（<code>reason: sweep-*</code>），并且不进题池。</p>
+      <p>等号的两根火柴是<b>锁死</b>的：既不能搬走，也不能往上放。少了这条规则，「从等号上偷一根变成 ≠」就是一个合法解，整个游戏就废了。</p>
+      <p>关卡来自 <code>tools/bake.mjs</code>：先造一个<b>成立的</b>等式，再倒着搬 1–4 手，最后用穷举量出真正的 par，按实测值分档。浏览器不做生成。</p>
+      <p class="save">成绩只存在这台设备的浏览器里。<button type="button" id="wipe">清空存档</button></p>
+    </details>
+  </aside>
+</main>
+
+<p class="toast" id="toast" hidden></p>
+<script type="module" src="js/main.js"></script>
+</body>
+</html>

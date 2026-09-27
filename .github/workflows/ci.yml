@@ -1,0 +1,53 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  # The model, the solver, the generator's proof and the shipped pool are all pure ES
+  # modules: no browser, no install step, no build artefact. Two rows are the reason this job
+  # exists:
+  #   * solve.test.mjs — the depth-1 product enumeration is complete by construction, and the
+  #     independent depth-2 sweep has to agree with the component BFS on every board;
+  #   * library.test.mjs — re-solves all 60 rows of js/data/lots.js from their serialised hex,
+  #     so a hand-edited `par` or a stale bake fails the build instead of shipping.
+  unit:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      # `npm run check` is the syntax step, deliberately invoked instead of re-typed here: the
+      # file set is `js/*.js js/*/*.js server.cjs electron/main.cjs tools/*.mjs test/*.mjs` and
+      # duplicating that glob list in two places is how a CI green build starts tolerating a
+      # file nothing checks. tools/playtest.mjs is in it, so the browser driver is parsed on
+      # every push even though only the browser job runs it.
+      - name: Syntax (same file set as package.json "check")
+        run: npm run check
+      - name: Suites
+        run: |
+          for f in test/*.test.mjs; do echo "::group::$f"; node "$f"; echo "::endgroup::"; done
+
+  # The shell is only proven by driving a real page with real mouse events: the drag hit-test,
+  # the locked `=` bars and the save file all live behind `window.matchwork`. SKIP_UNIT=1
+  # because the suites above are their own job. verify.sh listens on 5185/9345 and refuses to
+  # start on a bound port, which on a fresh runner means it never silently skips.
+  browser:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - name: Headless playtest
+        env:
+          SKIP_UNIT: 1
+          WD_TIMEOUT: 300
+        run: bash tools/verify.sh

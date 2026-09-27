@@ -1,0 +1,49 @@
+name: Deploy to GitHub Pages
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  pages: write
+  id-token: write
+
+concurrency:
+  group: pages
+  cancel-in-progress: false
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      # No bundler, no dependencies, no binary assets: the game ships plain ES modules and
+      # canvas drawing code, so the site is a file copy — and only these three paths are
+      # reachable from index.html. Deliberately NOT `path: .`: the dev server, the Electron
+      # main process, the bake tool and the node test suites would otherwise be published too,
+      # and `tools/bake.mjs` + `js/core/make.js` are the generator, which is the one thing this
+      # repo promises never runs in the browser.
+      #
+      # js/data/lots.js is a *source* file here (60 measured rows checked in by the bake), so
+      # copying `js` carries the whole pool and no build step has to run to produce it.
+      - name: Assemble static site
+        run: |
+          mkdir _site
+          cp index.html _site/
+          cp -r css js _site/
+      - uses: actions/configure-pages@v5
+      - uses: actions/upload-pages-artifact@v3
+        with:
+          path: _site
+
+  deploy:
+    needs: build
+    runs-on: ubuntu-latest
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+      - id: deployment
+        uses: actions/deploy-pages@v4

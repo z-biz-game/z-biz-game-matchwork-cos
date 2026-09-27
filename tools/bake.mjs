@@ -1,0 +1,139 @@
+// The content pipeline. This is where every puzzle in this game comes from — the browser
+// never generates a lot, it only picks one.
+//
+// Why offline: `makeLot` draws a true equation, walks a few legal 搬 backwards, and then
+// *certifies* the result with a complete enumeration. The certification is cheap (see the
+// numbers this script prints) but it is a build cost, not a tap cost, and CONTRACT.md asks
+// that no unbounded search ever run behind a click.
+//
+//   node tools/bake.mjs                    # -> js/data/lots.js
+//   PER_TIER=24 SEED=v2 node tools/bake.mjs
+//
+// Nothing unmeasured ships. For every emitted row the script re-runs the *whole* proof a
+// second time from the serialised spec+state (not from the generator's in-memory board) and
+// refuses the row unless the re-proof reproduces the same par with a complete proof. A row
+// whose sweep was cut short (so `parOf` returns `par: null, reason: 'sweep-*'`), or whose par
+// lands outside its band, is discarded here rather than shipped with a caveat.
+
+import { mkdirSync, writeFileSync } from 'node:fs';
+import { dirname, join } from 'node:path';
+import { fileURLToPath } from 'node:url';
+
+import { compileShape, decodeHex, encodeHex, legal, holds, showState, countLit } from '../js/core/board.js';
+import { parOf } from '../js/core/solve.js';
+import { TIERS, makeLot } from '../js/core/make.js';
+
+const here = dirname(fileURLToPath(import.meta.url));
+const root = join(here, '..');
+const PER_TIER = Number(process.env.PER_TIER || 12);
+const SEED = process.env.SEED || 'bake-v1';
+const MAX_ATTEMPTS = Number(process.env.MAX_ATTEMPTS || PER_TIER * 40);
+
+const total0 = Date.now();
+const out = [];
+const report = [];
+
+for (const tier of TIERS) {
+  const seen = new Set();
+  const picked = [];
+  const stats = {};
+  let attempts = 0;
+  let genMs = 0;
+  let proofMs = 0;
+  const t0 = Date.now();
+  while (picked.length < PER_TIER && attempts < MAX_ATTEMPTS) {
+    attempts++;
+    const g0 = Date.now();
+    const lot = makeLot(`${SEED}|${tier.key}|${attempts}`, tier, stats);
+    genMs += Date.now() - g0;
+    if (!lot) continue;
+    const hex = encodeHex(lot.state);
+    const sig = `${lot.spec}|${hex}`;
+    if (seen.has(sig)) { stats.duplicate = (stats.duplicate || 0) + 1; continue; }
+    // Re-proof from the *serialised* row. Different code path out of make.js, same rules:
+    // if the number depends on the generator's in-memory board, this is where it shows.
+    const shape = compileShape(lot.spec);
+    const state = decodeHex(hex);
+    if (legal(shape, state)) throw new Error(`${tier.key}: serialised board is illegal`);
+    if (holds(shape, state)) throw new Error(`${tier.key}: serialised board is already true`);
+    const p0 = Date.now();
+    const again = parOf(shape, state);
+    proofMs += Date.now() - p0;
+    if (!again.complete) {
+      throw new Error(`${tier.key}: re-proof incomplete (${again.reason}) — refusing to ship an estimate`);
+    }
+    if (again.par !== lot.par) {
+      throw new Error(`${tier.key}: par ${lot.par} not reproducible from the spec (re-proof says ${again.par})`);
+    }
+    seen.add(sig);
+    picked.push({
+      id: `${tier.key}-${String(picked.length + 1).padStart(2, '0')}`,
+      tier: tier.key,
+      par: again.par,
+      proof: again.proof,
+      n1: again.n1,
+      n2: again.n2,
+      states: again.states === undefined ? null : again.states,
+      space: again.cost.depth1.space,
+      plans: again.cost.depth1.plans,
+      legalStates: again.cost.depth1.legalStates,
+      pairs: again.cost.bfs ? again.cost.bfs.pairs : null,
+      ms: Math.round((again.cost.depth1.ms || 0) + ((again.cost.bfs && again.cost.bfs.ms) || 0)),
+      spec: shape.spec,
+      state: hex,
+      route: again.path.map((m) => ({ off: m.off, on: m.on })),
+      text: showState(shape, state),
+      lit: countLit(state),
+    });
+    process.stdout.write(`\r${tier.key}: ${picked.length}/${PER_TIER}  ${((Date.now() - t0) / 1000).toFixed(1)}s   `);
+  }
+  process.stdout.write('\n');
+  if (picked.length < PER_TIER) console.error(`warn: ${tier.key} only reached ${picked.length}/${PER_TIER} lots in ${attempts} attempts`);
+  const counted = Object.entries(stats).filter(([k]) => k !== 'found' && k !== 'lastCost');
+  report.push({
+    tier: tier.key,
+    label: tier.label,
+    want: PER_TIER,
+    got: picked.length,
+    attempts,
+    accepted: picked.length ? `${((picked.length / attempts) * 100).toFixed(1)}%` : '0%',
+    genMs: +(genMs / Math.max(1, attempts)).toFixed(1),
+    proofMs: +(proofMs / Math.max(1, picked.length)).toFixed(1),
+    maxPar: Math.max(...picked.map((p) => p.par)),
+    maxSpace: Math.max(...picked.map((p) => p.space)),
+    maxPairs: Math.max(...picked.map((p) => p.pairs || 0)),
+    maxStates: Math.max(...picked.map((p) => p.states || 0)),
+    maxMs: Math.max(...picked.map((p) => p.ms)),
+    rejects: Object.fromEntries(counted),
+  });
+  out.push(...picked);
+}
+
+const lines = [
+  '// Generated by tools/bake.mjs — the levels in this game are measurements, not opinions.',
+  '//',
+  '// `par` is the output of a *complete* enumeration of every legal 搬 sequence of that',
+  '// length (`proof` names which one), re-run from the two fields on the same line before',
+  '// the row was allowed in. `route` is one proved-shortest solution, stored so the page',
+  '// can re-check its own puzzle in a handful of moves instead of re-running the proof on',
+  '// every tap. Re-run `node tools/bake.mjs`; do not hand-edit. `npm test` fails if a line',
+  '// and its number disagree.',
+  `export const BAKED_AT = ${JSON.stringify(new Date().toISOString())};`,
+  `export const BAKE = ${JSON.stringify({ seed: SEED, perTier: PER_TIER, report }, null, 2)};`,
+  'export const LOTS = [',
+  ...out.map((l) => `  ${JSON.stringify(l)},`),
+  '];',
+  '',
+];
+const path = join(root, 'js', 'data', 'lots.js');
+mkdirSync(dirname(path), { recursive: true });
+writeFileSync(path, lines.join('\n'));
+
+const byTier = {};
+for (const l of out) byTier[l.tier] = (byTier[l.tier] || 0) + 1;
+console.log(`wrote ${out.length} lots (${Object.entries(byTier).map(([k, n]) => `${k}:${n}`).join(' ')}) -> js/data/lots.js in ${((Date.now() - total0) / 1000).toFixed(1)}s`);
+for (const r of report) {
+  console.log(`  ${r.tier.padEnd(7)} ${r.got}/${r.want} accepted ${r.accepted} of ${r.attempts} attempts`
+    + ` · gen ${r.genMs}ms/try · proof ${r.proofMs}ms/lot`
+    + ` · max space ${r.maxSpace} pairs ${r.maxPairs} states ${r.maxStates} ${r.maxMs}ms`);
+}

@@ -1,0 +1,37 @@
+{
+  "name": "matchwork",
+  "version": "1.0.0",
+  "description": "火柴等式 Matchwork — 浏览器原生火柴棒算术. 每关最少搬数由合法版面图上的完整 BFS 量出, 关卡在构建期生成并复验.",
+  "type": "module",
+  "main": "electron/main.cjs",
+  "scripts": {
+    "start": "node server.cjs",
+    "dev": "node server.cjs 5217",
+    "electron": "electron .",
+    "bake": "node tools/bake.mjs",
+    "check": "for f in js/*.js js/*/*.js server.cjs electron/main.cjs tools/*.mjs test/*.mjs; do node --check \"$f\" || exit 1; done && echo OK",
+    "unit": "for f in test/*.test.mjs; do echo \":: $f\"; node \"$f\" || exit 1; done",
+    "test": "npm run check && npm run unit",
+    "verify": "bash tools/verify.sh"
+  },
+  "keywords": [
+    "game",
+    "puzzle",
+    "matchstick",
+    "matchbook-puzzle",
+    "bfs",
+    "procedural",
+    "electron"
+  ],
+  "author": "z-biz-game",
+  "license": "MIT",
+  "dependencies": {},
+  "devDependencies": {},
+  "build": {
+    "appId": "com.zbiz.matchwork",
+    "productName": "Matchwork",
+    "mac": { "category": "public.app-category.puzzle-games" },
+    "win": { "target": "nsis" },
+    "linux": { "target": "AppImage" }
+  }
+}
