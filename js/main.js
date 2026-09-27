@@ -380,6 +380,13 @@ el.wipe.addEventListener('click', () => {
 
 window.addEventListener('hashchange', apply);
 window.addEventListener('resize', () => view.measure());
+// A page that grows a vertical scrollbar after first paint narrows its content by ~15px without
+// firing window 'resize' (the window itself did not change), which on a CI runner left measure()
+// holding a 592px backing store inside a 577px box. Observing the canvas catches that reflow.
+const layoutCanvas = view.canvas || document.querySelector('canvas');
+if (layoutCanvas && typeof ResizeObserver === 'function') {
+  new ResizeObserver(() => view.measure()).observe(layoutCanvas);
+}
 window.addEventListener('keydown', (ev) => {
   if (ev.metaKey || ev.ctrlKey || ev.altKey) return;
   const k = ev.key.toLowerCase();
