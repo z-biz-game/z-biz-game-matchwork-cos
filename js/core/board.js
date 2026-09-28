@@ -484,19 +484,102 @@ export function planMove(shape, state, offIdx, onIdx) {
 // at each one: `space` is the |lit| x |dark| product the spec talks about, `plans` are the
 // pairs that are even structurally a move, `states` are those that survive the glyph and
 // leading-zero filter.
+//
+// The sweep calls this once per visited board, and the naive shape of the loop — copy the
+// whole board, re-legality-check the whole board, for every one of the ~500 pairs — is what
+// the sweep's wall clock actually buys. Two facts make it cheaper without moving the counts:
+//
+//   1. `off` and `on` are already filtered by "unlocked, not denied, lit" and "unlocked, not
+//      denied, dark", so `planMove`'s four refusals cannot fire for a pair out of those two
+//      lists — a pair is a plan by construction, which is why `plans == space` here.
+//   2. Legality is a per-cell property (glyph table) plus a per-operand-head property (leading
+//      zero). A move rewrites exactly two cells, so if the board we are expanding is legal,
+//      every *other* cell's answer is the parent's answer, already known good. Checking the
+//      parent once (O(n)) and the two touched cells per pair (O(1)) is the same verdict as
+//      `legalQuick` on the whole child — `test/board.test.mjs` walks both paths over an entire
+//      shape space and compares them pair by pair.
+//
+// So the parent is validated once, a single scratch board is reused for the whole product
+// (mutate two bytes, run the two-cell verdict, revert), and a fresh array is allocated only
+// for the ~15 pairs that survive the filter. A parent that is *not* legal keeps the original
+// path verbatim: an illegal board's successor can be legal by fixing the broken cell, and
+// that is the one case where "the other cells are fine" does not hold.
+const DIGIT_ZERO_MASK = DIGIT_PATTERN[0];
+const DIGIT_MASK_OK = okTable(DIGIT_PATTERN);
+const OP_MASK_OK = okTable(OP_PATTERN);
+
+function okTable(pattern) {
+  const t = new Uint8Array(256);
+  for (const k of Object.keys(pattern)) t[pattern[k]] = 1;
+  return t;
+}
+
+// Masks here always come out of bit operations on a Uint8Array byte, so they are integers in
+// 0..255 and the table index is exact — unlike `legalQuick`'s object lookup, which has to
+// survive hand-written states of any shape.
+function maskOk(isDigit, v) {
+  return isDigit ? DIGIT_MASK_OK[v] === 1 : OP_MASK_OK[v] === 1;
+}
+
+const cellFacts = new WeakMap();
+function shapeCellFacts(shape) {
+  let f = cellFacts.get(shape);
+  if (!f) {
+    const digit = Uint8Array.from(shape.cells, (c) => (c.t === T_DIGIT ? 1 : 0));
+    const head = new Uint8Array(shape.n);
+    for (const o of shape.operands) if (o.cells.length > 1) head[o.cells[0]] = 1;
+    f = { digit, head };
+    cellFacts.set(shape, f);
+  }
+  return f;
+}
+
 export function eachSuccessor(shape, state, cb, opts = {}) {
   const deny = opts.deny || null;
   const off = pickableSegments(shape, state, deny);
   const on = droppableSegments(shape, state, deny);
   const tally = { space: off.length * on.length, plans: 0, states: 0 };
+  if (!legalQuick(shape, state)) {
+    for (const a of off) {
+      for (const b of on) {
+        const plan = planMove(shape, state, a.i, b.i);
+        if (!plan) continue;
+        tally.plans++;
+        if (!legalQuick(shape, plan.next)) continue;
+        tally.states++;
+        cb(plan.next, plan);
+      }
+    }
+    return tally;
+  }
+  const facts = shapeCellFacts(shape);
+  const scratch = Uint8Array.from(state);
   for (const a of off) {
+    const ca = a.cell;
+    const clear = ~(1 << a.bit);
+    const aHead = facts.head[ca];
+    const aDigit = facts.digit[ca];
     for (const b of on) {
-      const plan = planMove(shape, state, a.i, b.i);
-      if (!plan) continue;
+      const cb2 = b.cell;
+      const sameCell = ca === cb2;
+      const baseA = scratch[ca];
+      const baseB = sameCell ? baseA : scratch[cb2];
       tally.plans++;
-      if (!legalQuick(shape, plan.next)) continue;
-      tally.states++;
-      cb(plan.next, plan);
+      const va = baseA & clear;
+      const vb = (sameCell ? va : baseB) | (1 << b.bit);
+      scratch[ca] = va;
+      scratch[cb2] = vb;
+      const ok = sameCell
+        ? maskOk(aDigit, vb) && !(aHead && vb === DIGIT_ZERO_MASK)
+        : maskOk(aDigit, va) && maskOk(facts.digit[cb2], vb)
+          && !(aHead && va === DIGIT_ZERO_MASK) && !(facts.head[cb2] && vb === DIGIT_ZERO_MASK);
+      if (ok) {
+        tally.states++;
+        const next = Uint8Array.from(scratch);
+        cb(next, { off: a.i, on: b.i, offCell: ca, onCell: cb2, next });
+      }
+      scratch[ca] = baseA;
+      if (!sameCell) scratch[cb2] = baseB;
     }
   }
   return tally;

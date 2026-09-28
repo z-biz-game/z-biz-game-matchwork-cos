@@ -415,6 +415,45 @@ test('board: successorCount reports the same three bands as eachSuccessor', () =
   eq(moveSpace(s, st).combos, tally.space);
 });
 
+// `eachSuccessor` decides legality from the two cells a move touches, having checked the
+// board it is expanding once. That is only the same question as "run `legalQuick` over the
+// whole child" if the reasoning holds for *every* board, so this compares the two definitions
+// against each other over full shape spaces — legal parents and illegal ones, which must take
+// the other branch — rather than trusting the argument. The reference is the pre-optimisation
+// definition itself: `rawSuccessors` (pure `planMove`) filtered by `legalQuick`.
+test('board: the two-cell verdict equals the whole-board verdict, and the sweep keeps no state', () => {
+  let legalParents = 0;
+  let illegalParents = 0;
+  let survivors = 0;
+  for (const spec of ['doded', 'ddodoed']) {
+    const { shape, boards } = allBoards(spec);
+    // 'doded' has three one-cell operands, so every board in its space is legal and only the
+    // fast branch is reachable there. 'ddodoed' opens with a two-cell operand, and a leading
+    // zero on it is the illegal parent that has to take the other branch — coverage is
+    // therefore counted across the two spaces, not per spec.
+    for (const st of boards) {
+      const before = encodeHex(st);
+      const pairs = rawSuccessors(shape, st);
+      const want = pairs
+        .filter((plan) => legalQuick(shape, plan.next))
+        .map((plan) => `${plan.off}>${plan.on}:${encodeHex(plan.next)}`);
+      const got = [];
+      const tally = eachSuccessor(shape, st, (next, plan) => {
+        got.push(`${plan.off}>${plan.on}:${encodeHex(next)}`);
+      });
+      eq(got, want, `${spec} · board ${before}: successor sets differ`);
+      eq(tally.plans, pairs.length, `${spec} · board ${before}: plans band differs`);
+      eq(tally.states, want.length, `${spec} · board ${before}: states band differs`);
+      eq(tally.space, pairs.length, `${spec} · board ${before}: space and plans must both be the pair count`);
+      eq(encodeHex(st), before, `${spec} · board ${before}: eachSuccessor mutated the board it was given`);
+      if (legalQuick(shape, st)) legalParents++; else illegalParents++;
+      survivors += want.length;
+    }
+  }
+  ok(illegalParents > 0, `no illegal parent was compared (${legalParents} legal only)`);
+  ok(survivors > 1000, `too few successors compared (${survivors}) to be a witness`);
+});
+
 test('board: showState prints the equals sign and the unicode operators', () => {
   // Each row carries its own spec: the cell count has to match the glyph count, so a shared
   // shape here would be a fixture bug (the three-digit left side of `9 − 4 − 0 = 5` needs
