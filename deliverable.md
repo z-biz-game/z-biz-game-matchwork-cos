@@ -46,17 +46,25 @@ README.md DESIGN.md deliverable.md
 最大候选空间 462 / 550 / 460 / 540 / 728，最大展开状态 191 / 841 / 2,354。
 
 浏览器层由主代理门禁实跑判定（内部调用本仓 `tools/verify.sh`）：
-**147 条断言 / 0 失败**，`=== ALL GREEN ===`，`npm run check` rc=0，node **103 / 0**，
+**147 条断言 / 0 失败**，`=== ALL GREEN ===`，`npm run check` rc=0，node **104 / 0**（2026-09-29 起
+`board.test.mjs` 多了一条 18 万父板的等价性断言，30 条 → 31 条），
 零依赖、0 个二进制资产、core purity clean、无幽灵导出。
-发布 sha `87eb738`，CI trigger `32099eb`。
 
-**线上 CI 的浏览器 job 目前是红的**（check-runs 实测：`deploy=success | build=success | unit=success | browser=failure`）。
-失败断言只有第一条：`the canvas is laid out, not the unstyled 300x150 default`，
-runner 上报回 `{"css":[577,300],"backing":[592,300],"dpr":1}` —— canvas 的 CSS 高度仍是未布局的默认 300，
-且 dpr=1。本机的 147/0 与 `=== ALL GREEN ===` 是**本机视口**（更高、dpr 2）下的结果，
-所以这一节的数字应当读作"本机全绿、GitHub runner 未通过"，修复方向见交付侧工具任务。
-上一版会话中断前留下的"发现第二个更大的浏览器层 bug"这条未确认记录，**与此是同一件事**：
-它现在有了可复现的失败断言，不再是猜测。
+线上口径按 sha 记，不写"目前"：
+- `87eb738`（交付当时的观测）：`browser=failure`，红的是第一条
+  `the canvas is laid out, not the unstyled 300x150 default`，runner 交回
+  `{"css":[577,300],"backing":[592,300],"dpr":1}` —— canvas 的 CSS 高度仍是未布局的默认 300。
+  本机 147/0 是更高、dpr 2 的视口下的结果，所以那一节的数当时代的是"本机全绿、runner 未通过"。
+  **这条后来转绿了**：`f0e3c2e` 与 `99655f8` 两次 CI 的 browser job 实测 `completed success`。
+- `f0e3c2e`：`browser=success`、`unit=failure` —— 红的换成 `library` 的 ANCHOR，
+  runner 上报"单次全扫 216.87ms"过 `ok(ms < 200)`（同一台 runner 上本机值 24.4ms）。
+- `99655f8`（2026-09-28 修复，见 DESIGN §4）：`unit=success` + `browser=success`；
+  runner 自己打的 `[re-proof]` 是 **worst single sweep 19.18ms**（60 行、最大分量 2354 态），
+  门槛一个数字没动；browser job 的 147 条分五段全 0 失败。线上产物同 SHA 实测
+  12 个 `index.html + css/* + js/*` 逐字节与 HEAD 相同、0 个不一致，
+  并把整条浏览器闸对着 `https://z-biz-game.github.io/z-biz-game-matchwork-cos/` 再跑一遍：147 / 0。
+上一版会话中断前留下的"发现第二个更大的浏览器层 bug"这条未确认记录，**与 `87eb738` 那条是同一件事**：
+它当时有了可复现的失败断言，不再是猜测，后来随该断言转绿一并闭账。
 
 需要如实记录的一点：本报告初稿在写这一节时门禁还没跑完，所以当时故意**不写**浏览器数字；
 上面的 147/0 是门禁实跑之后回填的实测值，而不是推测。上一条会话中断前留下的
@@ -78,8 +86,9 @@ runner 上报回 `{"css":[577,300],"backing":[592,300],"dpr":1}` —— canvas �
 
 - **par=3 的穷举强度待复核**：见改动表 #2。规格要求 par=3 只声明下界，
   而 `proof` 标签没有区分；要收紧的话应新增标签值（如 `bounded-3`）而不是改文档措辞。
-- **浏览器层存在一条未证实的"第二个更大 bug"记录**：上一条会话在确认它时中断。
-  若门禁实跑变红，那既不是回归也不是既成事实，而是这条未确认记录的落实，需要按现象重新定位。
+- **浏览器层那条"第二个更大 bug"的未证实记录已闭账**：它对应的就是 `87eb738` 上
+  `the canvas is laid out` 这条断言（见上一节），`f0e3c2e` 与 `99655f8` 两次 CI 的 browser job
+  都实测 success，本机与线上两种口径各自 147 / 0。
 - **音效 / 动画 / 火柴贴图素材**：没有（零二进制资产是硬约束）。
 - **Electron**：`electron/main.cjs` 只过 `node --check`，未安装 electron、未真实启动。
 - **真机触摸**：手势只经 CDP 合成事件验证。

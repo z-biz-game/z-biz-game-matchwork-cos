@@ -45,6 +45,8 @@ test('library: ANCHOR — re-solving every serialised row reproduces its printed
   let states = 0;
   let maxStates = 0;
   let ms = 0;
+  let worstRow = '';
+  let worstRowStates = 0;
   for (const row of LOTS) {
     const shape = compileShape(row.spec);
     const state = decodeHex(row.state);
@@ -63,7 +65,10 @@ test('library: ANCHOR — re-solving every serialised row reproduces its printed
     proofs.add(again.proof);
     states += again.states || 0;
     maxStates = Math.max(maxStates, again.states || 0);
-    ms = Math.max(ms, (again.cost.bfs && again.cost.bfs.ms) || 0);
+    // 最坏那一次全扫是谁跑的、跑了多少态，跟着数字一起交回：一条只说"216.87ms"的红灯要求
+    // 先复现才知道红得有没有道理，而 "deep-11 的 2354 态分量跑了 216.87ms" 当场就是结论。
+    const rowMs = (again.cost.bfs && again.cost.bfs.ms) || 0;
+    if (rowMs >= ms) { ms = rowMs; worstRow = row.id; worstRowStates = again.states || 0; }
     // The stored route is a *second*, independent witness: it must solve the board, and it
     // must be exactly `par` steps long, so the page can re-check a puzzle in a handful of
     // moves without running the sweep again.
@@ -74,8 +79,9 @@ test('library: ANCHOR — re-solving every serialised row reproduces its printed
   eq(mismatches, [], 'serialised rows and the solver disagree');
   eq([...proofs].sort(), ['exhaustive-1', 'exhaustive-bfs'], 'a row carried a proof nobody can print');
   console.log(`  [re-proof] ${LOTS.length} rows re-measured · max component ${maxStates} states`
-    + ` · worst single sweep ${ms}ms · mean component ${(states / LOTS.length).toFixed(1)}`);
-  ok(ms < 200, `a single sweep took ${ms}ms; the "par 3 is exhaustible" finding is at risk`);
+    + ` · worst single sweep ${ms}ms (${worstRow}, ${worstRowStates} states)`
+    + ` · mean component ${(states / LOTS.length).toFixed(1)}`);
+  ok(ms < 200, `a single sweep took ${ms}ms on ${worstRow} (${worstRowStates} states); the "par 3 is exhaustible" finding is at risk`);
 });
 
 test('library: a tampered row is refused by verifyRow rather than silently shown', () => {
