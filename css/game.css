@@ -24,17 +24,28 @@ button {
   background: var(--card);
   border: 1px solid var(--line);
   border-radius: 8px;
+  /* 44px 是 iOS HIG 的最小可点边长。拇指按不中一个 26px 的按钮时，玩家会以为自己
+     拖错了火柴 —— 命中区不是样式问题，是可玩性问题，所以写在基础规则里而不是
+     @media (pointer: coarse)：桌面用鼠标点一个 44px 的按钮不会受伤。 */
+  min-height: 44px;
+  min-width: 44px;
   padding: 6px 12px;
   cursor: pointer;
+  transition: border-color 120ms ease, background 120ms ease, transform 120ms ease;
 }
 button:hover:not(:disabled) { border-color: var(--amber); }
+button:active:not(:disabled) { transform: translateY(1px); }
 button:disabled { opacity: 0.4; cursor: not-allowed; }
 button.primary { background: var(--amber); color: #211a0c; border-color: var(--amber); font-weight: 600; }
 code { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 0.9em; color: var(--amber); }
 
 .topbar {
   display: flex; align-items: center; gap: 16px;
-  padding: 12px 20px; border-bottom: 1px solid var(--line); background: var(--bg2);
+  /* viewport-fit=cover 之后，刘海和底部横条会盖住普通 padding —— 四个方向都按 env() 加回去，
+     否则 iPhone 上第一行按钮是点不到的（不是难看，是点不到）。 */
+  padding: calc(12px + env(safe-area-inset-top)) calc(20px + env(safe-area-inset-right))
+           12px calc(20px + env(safe-area-inset-left));
+  border-bottom: 1px solid var(--line); background: var(--bg2);
   flex-wrap: wrap;
 }
 .brand { margin: 0; font-size: 19px; letter-spacing: 2px; display: flex; align-items: baseline; gap: 8px; }
@@ -47,7 +58,10 @@ code { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 0
 
 .stage {
   flex: 1; display: grid; grid-template-columns: minmax(0, 1fr) 320px;
-  gap: 18px; padding: 18px 20px 26px; align-items: start;
+  gap: 18px;
+  padding: 18px calc(20px + env(safe-area-inset-right))
+           calc(26px + env(safe-area-inset-bottom)) calc(20px + env(safe-area-inset-left));
+  align-items: start;
 }
 @media (max-width: 880px) { .stage { grid-template-columns: minmax(0, 1fr); } }
 
@@ -106,8 +120,30 @@ canvas.grabbing { cursor: grabbing; }
 .about .save { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
 
 .toast {
-  position: fixed; left: 50%; bottom: 26px; transform: translateX(-50%);
+  position: fixed; left: 50%; bottom: calc(26px + env(safe-area-inset-bottom));
+  transform: translateX(-50%);
   background: #0d0c0a; border: 1px solid var(--amber); color: var(--ink);
   padding: 8px 16px; border-radius: 999px; font-size: 13px; z-index: 20;
+  animation: toast-in 180ms ease-out both;
 }
 .toast[hidden] { display: none; }
+
+/* 游戏的动就这么多：过关幕布升起、星星弹一下、toast 滑进来、题面被点亮的那一格闪一下。
+   下面那条 reduce 分支必须逐条把它们关掉，所以这里也不许用 `all` 一把梭。 */
+@keyframes curtain-in { from { opacity: 0; transform: translateY(10px) scale(0.985); } to { opacity: 1; transform: none; } }
+@keyframes star-pop { 0% { opacity: 0; transform: scale(0.6); } 70% { transform: scale(1.12); } 100% { opacity: 1; transform: scale(1); } }
+@keyframes toast-in { from { opacity: 0; transform: translate(-50%, 8px); } to { opacity: 1; transform: translate(-50%, 0); } }
+@keyframes chip-flash { 0%, 100% { border-color: var(--line); } 40% { border-color: var(--green); } }
+
+.curtain-card { animation: curtain-in 200ms ease-out both; }
+.stars span { display: inline-block; animation: star-pop 260ms ease-out both; }
+.shelf button.flash { animation: chip-flash 420ms ease-out 1; }
+
+@media (prefers-reduced-motion: reduce) {
+  .curtain-card { animation: none; }
+  .stars span { animation: none; }
+  .toast { animation: none; }
+  .shelf button.flash { animation: none; border-color: var(--green); }
+  button { transition: none; }
+  button:active:not(:disabled) { transform: none; }
+}

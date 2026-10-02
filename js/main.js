@@ -236,7 +236,16 @@ function commit(off, on) {
 }
 
 function stars(n) {
-  return '★'.repeat(n) + '☆'.repeat(Math.max(0, 3 - n));
+  // 一颗一个 <span>：css 里 `.stars span` 有逐颗弹入，reduce-motion 分支要能逐条关掉。
+  // 写成一行文本的话那条动画（以及它对应的无障碍分支）就都是空规则了。
+  const nodes = [];
+  for (let i = 0; i < 3; i += 1) {
+    const sp = document.createElement('span');
+    sp.textContent = i < n ? '★' : '☆';
+    sp.style.animationDelay = `${i * 70}ms`;
+    nodes.push(sp);
+  }
+  el.stars.replaceChildren(...nodes);
 }
 
 function finish() {
@@ -258,7 +267,13 @@ function finish() {
     if (app.index < campaignLength()) nextIndex = app.index + 1;
   }
   const quality = gr.perfect ? 3 : gr.optimal ? 2 : 1;
-  el.stars.textContent = stars(quality);
+  stars(quality);
+  // 题池里这一格闪一下：动效关掉时（reduce-motion）它退化成常亮的绿边，信息不丢。
+  const chip = el.shelf.querySelector(`[data-index="${app.index}"]`);
+  if (chip) {
+    chip.classList.add('flash');
+    chip.addEventListener('animationend', () => chip.classList.remove('flash'), { once: true });
+  }
   el.verdict.textContent = gr.perfect ? `正好 ${lot.par} 搬，一次提示都没要`
     : gr.optimal ? `${lot.par} 搬完成，用了 ${gr.hints} 次提示`
       : `解出来了：${gr.moves} 搬，最少 ${lot.par} 搬`;
