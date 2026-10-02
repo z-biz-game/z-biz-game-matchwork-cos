@@ -325,4 +325,32 @@ test('storage: the module exposes nothing the shell does not call', () => {
     `the save module exports ${JSON.stringify(exported)}`);
 });
 
+// 存档解码是两段式的：第一段 JSON.parse，坏了就整份回默认；第二段逐字段形状检查，
+// 认得出的留下、认不出的回默认。上面那条量的是第一段，这条量的是第二段里新加的那个布尔。
+test('storage: a poisoned mute preference cannot survive the shape check', () => {
+  const store = fakeStore();
+  withWindow(store);
+  const readAs = (obj) => {
+    store.map.set(save.key(), JSON.stringify(obj));
+    save._forget();
+    return save.snapshot();
+  };
+  for (const junk of ['yes', 1, 'true', {}, [], null]) {
+    const s = readAs({ version: 1, prefs: { muted: junk } });
+    eq(s.prefs.muted, false, `prefs.muted=${JSON.stringify(junk)} 被当成了静音`);
+  }
+  eq(readAs({ version: 1, prefs: { muted: true } }).prefs.muted, true, '存好的静音没读回来');
+  eq(readAs({ version: 1, prefs: 'not-an-object' }).prefs.muted, false, '整个 prefs 是字符串时没回默认');
+  // 写回去的必须是清洗过的形状，坏样本不能留在盘上继续毒下一次启动。
+  store.map.set(save.key(), JSON.stringify({ version: 1, prefs: { muted: 'yes' } }));
+  save._forget();
+  save.bump('drags');
+  eq(JSON.parse(raw(store)).prefs, { muted: false }, '清洗过的 prefs 没有回写');
+  save._forget();
+  eq(save.setMuted(true), true);
+  eq(save.muted(), true);
+  save._forget();
+  eq(save.muted(), true, '静音没落到盘上');
+});
+
 run();
