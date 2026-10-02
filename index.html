@@ -36,6 +36,7 @@
     <button type="button" data-mode="random">随机</button>
   </nav>
   <p class="totals" id="totals"></p>
+  <button type="button" id="help" class="help" aria-expanded="false" aria-controls="tutorial">玩法说明</button>
 </header>
 
 <main class="stage">
@@ -43,6 +44,15 @@
     <p class="equation" id="equation"></p>
     <canvas id="lot" aria-label="火柴等式版面"></canvas>
     <p class="hint-line" id="hintline"></p>
+    <div class="curtain" id="pause-curtain" hidden>
+      <div class="curtain-card">
+        <h2 id="pause-title">已暂停</h2>
+        <p class="tally">模拟时钟已停住：提示的脉冲、余烬、声音都不再前进。</p>
+        <div class="curtain-actions">
+          <button type="button" id="resume" class="primary">继续</button>
+        </div>
+      </div>
+    </div>
     <div class="curtain" id="curtain" hidden>
       <div class="curtain-card">
         <p class="stars" id="stars"></p>
@@ -63,6 +73,9 @@
       <button type="button" id="undo">撤销</button>
       <button type="button" id="hint">提示</button>
       <button type="button" id="restart">重开</button>
+      <button type="button" id="pause" aria-pressed="false">暂停</button>
+      <button type="button" id="mute" aria-pressed="false">静音</button>
+      <button type="button" id="fullscreen" aria-pressed="false">全屏</button>
       <button type="button" id="share">分享</button>
     </div>
     <div class="shelf" id="shelf"></div>
@@ -75,6 +88,22 @@
     </details>
   </aside>
 </main>
+
+<div class="curtain tutorial" id="tutorial" hidden role="dialog" aria-modal="true" aria-labelledby="tutorial-title">
+  <div class="curtain-card tutorial-card">
+    <h2 id="tutorial-title">怎么玩：搬，不是添，也不是减</h2>
+    <ol class="steps">
+      <li>一手搬法 = <b>拿起一根</b> + <b>放到一个空位上</b>。全盘火柴总数永远不变，所以等式两边的火柴数差是固定的。</li>
+      <li>按住一根火柴拖到虚线空位松手；或者点一下拿起、再点一下放下。两种手势走同一条规则检查。</li>
+      <li>等号那两根<b>锁死</b>：搬不走，也不能往上放。少了这条，「从等号偷一根变成 ≠」就是合法解，游戏当场作废。</li>
+      <li>面板上的「最少」不是猜的：是在合法版面图上逐层穷举量出来的。跑不完就不印数字，那一题也不进题池。</li>
+      <li>键盘：<code>Enter</code>/<code>空格</code> 开局或暂停 · <code>P</code> 暂停 · <code>R</code> 重开 · <code>U</code> 撤销 · <code>H</code> 提示 · <code>M</code> 静音 · <code>F</code> 全屏 · <code>?</code> 这份说明</li>
+    </ol>
+    <div class="curtain-actions">
+      <button type="button" id="tutorial-ok" class="primary">开始搬</button>
+    </div>
+  </div>
+</div>
 
 <p class="toast" id="toast" hidden></p>
 <script src="js/sw-register.js"></script>

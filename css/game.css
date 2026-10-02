@@ -91,6 +91,15 @@ canvas.grabbing { cursor: grabbing; }
 .tally { color: var(--dim); margin: 0 0 14px; font-size: 14px; }
 .tally b { color: var(--ink); }
 .curtain-actions { display: flex; gap: 10px; justify-content: center; }
+/* 教学幕布盖住整个视口（不是只盖住版面）：说明要连着顶栏一起挡住，
+   否则玩家可以边读边点模式切换，教学就成了装饰。 */
+.curtain.tutorial { position: fixed; inset: 0; z-index: 15; background: rgba(10, 9, 8, 0.92); }
+.tutorial-card { text-align: left; max-width: 520px; }
+.tutorial-card h2 { font-size: 18px; }
+.steps { margin: 10px 0 16px; padding-left: 22px; color: var(--dim); }
+.steps li { margin: 7px 0; }
+.steps b { color: var(--ink); }
+.help { margin-left: 4px; }
 
 .panel { display: flex; flex-direction: column; gap: 14px; }
 .crumbs { margin: 0; font-size: 16px; }

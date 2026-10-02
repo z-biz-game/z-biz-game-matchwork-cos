@@ -22,6 +22,10 @@ function blank() {
     daily: {},
     unlocked: 1,
     stats: { solves: 0, perfect: 0, moves: 0, drags: 0, refused: 0, hints: 0 },
+    // 唯一的一个"设置"：静音。它和成绩一起放同一个 key，是因为这仓规定不许有第二个存储
+    // （见 test/storage.test.mjs 的 "no second store anywhere"）—— 静音记在别的 key 上
+    // 就等于偷偷开了两处存档，下次清档会留下一半。
+    prefs: { muted: false },
   };
 }
 
@@ -59,6 +63,7 @@ function sanitize(parsed) {
     records: {},
     daily: {},
     unlocked: num(parsed.unlocked, base.unlocked) || 1,
+    prefs: { ...base.prefs },
     stats: { ...base.stats, ...(parsed.stats && typeof parsed.stats === 'object' ? parsed.stats : {}) },
   };
   if (parsed.records && typeof parsed.records === 'object') {
@@ -72,6 +77,9 @@ function sanitize(parsed) {
       };
     }
   }
+  // prefs 只有一个布尔，所以逐字段判而不是整体透传：`muted: "no"` 这种手改的字符串
+  // 会变成 truthy，玩家看到的是"我没点静音但它响了"。
+  out.prefs = { muted: parsed.prefs?.muted === true };
   if (parsed.daily && typeof parsed.daily === 'object') {
     for (const [day, id] of Object.entries(parsed.daily)) {
       if (typeof id === 'string' && /^\d{4}-\d{2}-\d{2}$/.test(day)) out.daily[day] = id;
@@ -184,6 +192,18 @@ export function bump(kind, by = 1) {
 
 export function stats() {
   return { ...load().stats };
+}
+
+export function muted() {
+  return load().prefs.muted;
+}
+
+// 静音是玩家自己按下去的一个布尔，不是计数器，所以不走 `num()` 那套非负整数校验。
+export function setMuted(v) {
+  const s = load();
+  s.prefs.muted = !!v;
+  persist();
+  return s.prefs.muted;
 }
 
 export function solvedIds() {

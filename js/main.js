@@ -12,6 +12,7 @@ import {
   tierLabel, stats as poolStats, rejected, dateKey, auditProofs,
 } from './core/library.js';
 import { createView } from './view.js';
+import { createAudio } from './core/audio.js';
 
 const $ = (id) => document.getElementById(id);
 const el = {
@@ -20,6 +21,8 @@ const el = {
   stars: $('stars'), verdict: $('verdict'), tally: $('tally'), undo: $('undo'), hint: $('hint'),
   restart: $('restart'), share: $('share'), next: $('next'), again: $('again'),
   toast: $('toast'), canvas: $('lot'), wipe: $('wipe'),
+  pause: $('pause'), mute: $('mute'), full: $('fullscreen'), help: $('help'), resume: $('resume'),
+  tutorial: $('tutorial'), tutorialOk: $('tutorial-ok'), pauseCurtain: $('pause-curtain'),
 };
 
 const app = {
@@ -32,6 +35,8 @@ const app = {
   day: null,
   refused: 0,
   drags: 0,
+  paused: false,
+  startedAt: 0,
 };
 
 function clampIndex(n) {
@@ -73,13 +78,72 @@ const view = createView(el.canvas, {
   onPick: (i) => {
     const ok = app.game.pick(i);
     if (!ok) refuse(app.game.refusal(), i);
-    else say(`拿起 <b>${nameOf(i)}</b> —— 拖到一个空位再松手`);
+    else {
+      audio.play('pick');
+      say(`拿起 <b>${nameOf(i)}</b> —— 拖到一个空位再松手`);
+    }
     renderReadout();
     return ok;
   },
   onCommit: (off, on) => commit(off, on),
   onRelease: () => renderReadout(),
 });
+
+const audio = createAudio({
+  initialMuted: save.muted(),
+  onChange: () => syncMuteButton(),
+});
+audio.setMuted(save.muted());
+
+// 声音只在真实手势之后才存在：浏览器不让页面自己解锁音频，先建上下文只会拿到一个
+// suspended 的壳。所以这里挂一次性监听，谁先来算谁。
+function unlockAudio() {
+  audio.unlock();
+  window.removeEventListener('pointerdown', unlockAudio, true);
+  window.removeEventListener('keydown', unlockAudio, true);
+}
+window.addEventListener('pointerdown', unlockAudio, true);
+window.addEventListener('keydown', unlockAudio, true);
+
+function syncMuteButton() {
+  if (!el.mute) return;
+  const m = audio.muted();
+  el.mute.setAttribute('aria-pressed', String(m));
+  el.mute.textContent = m ? '已静音' : '静音';
+}
+
+// prefers-reduced-motion 是一条真实的分支，不是一句口号：它决定余烬还发不发、脉冲还抖不抖。
+const motionMq = typeof matchMedia === 'function' ? matchMedia('(prefers-reduced-motion: reduce)') : null;
+function applyMotionPref() {
+  const reduce = !!(motionMq && motionMq.matches);
+  view.setReducedMotion(reduce);
+  return reduce;
+}
+if (motionMq && motionMq.addEventListener) motionMq.addEventListener('change', applyMotionPref);
+
+// 台面毛毡与余烬是仓里的真位图；拿不到（离线首帧、file:// 被拒）就退回纯色，版面照画。
+function loadArt() {
+  // 桩环境（node 侧的加载扫描）里没有 Image：那里量的是模块图能不能跑通，不是像素。
+  if (typeof Image !== 'function') return;
+  const want = { felt: 'assets/textures/felt-256.png', ember: 'assets/textures/ember-64.png' };
+  const art = {};
+  let left = 0;
+  for (const [k, src] of Object.entries(want)) {
+    const img = new Image();
+    left += 1;
+    img.onload = () => {
+      art[k] = img;
+      left -= 1;
+      if (left <= 0) view.setArt(art);
+    };
+    img.onerror = () => {
+      left -= 1;
+      if (left <= 0) view.setArt(art);
+    };
+    img.src = src;
+  }
+}
+loadArt();
 
 function nameOf(i) {
   const seg = app.game.shape.segments[i];
@@ -101,6 +165,7 @@ function refuse(reason, segIdx) {
   app.refused++;
   save.bump('refused');
   say(`${reason}`, true);
+  audio.play('refuse');
   if (segIdx !== undefined && segIdx !== null) view.flashBad(segIdx);
 }
 
@@ -111,6 +176,9 @@ function setGame(lot) {
   app.drags = 0;
   view.attach(app.game);
   el.curtain.hidden = true;
+  // 换题 = 换一个局面，暂停这种"当前局面的状态"不该跨过去（view.attach 内部已经把
+  // 模拟时钟清零了，这里不同步的话按钮会显示"继续"而局面其实已经在跑）。
+  setPaused(false);
   el.equation.textContent = lot.text;
   say('按住一根火柴的端头，拖到一个空位上。等号那两根不动。');
 }
@@ -222,6 +290,9 @@ function commit(off, on) {
   }
   app.drags++;
   save.bump('drags');
+  audio.play('drop');
+  // 火星撒在落点那一格：reduce-motion 开着时 emit 自己返回 0，一把都不产生。
+  view.sparksAt(on, 12, 1);
   el.equation.textContent = showState(app.game.shape, app.game.state());
   if (app.game.solved()) {
     view.redraw();
@@ -249,6 +320,8 @@ function stars(n) {
 }
 
 function finish() {
+  audio.play('win');
+  view.sparksAtCenter(30, 1.5);
   const lot = app.lot;
   const g = app.game;
   const gr = g.grade();
@@ -366,13 +439,70 @@ el.hint.addEventListener('click', () => {
 
 function restart() {
   app.game.restart();
-  view.attach(app.game);
+  // view.attach 里做的那次 anim.reset() 清的是时钟/步数/粒子；这里补上另外三样：
+  // 上一局还在响的尾音、本局拒绝计数、以及暂停幕布。重开之后是一个干净的局面，
+  // 不是一个"静音还挂着上一局尾音、暂停还锁着输入"的假重开。
+  audio.reset();
+  app.refused = 0;
+  app.startedAt = Date.now();
+  setPaused(false);
   el.curtain.hidden = true;
+  view.attach(app.game);
   render();
   say('回到最初那副摆法');
 }
 
+function setPaused(next) {
+  const want = !!next;
+  if (want === app.paused) return app.paused;
+  app.paused = view.setPaused(want);
+  if (el.pauseCurtain) el.pauseCurtain.hidden = !app.paused;
+  if (el.pause) {
+    el.pause.setAttribute('aria-pressed', String(app.paused));
+    el.pause.textContent = app.paused ? '继续' : '暂停';
+  }
+  // 暂停同时挂起音频：一个还在响的上下文不算暂停。静音时不动它，别把玩家的选择改掉。
+  if (!audio.muted()) audio.setMuted(app.paused ? true : save.muted());
+  return app.paused;
+}
+
+function toggleFullscreen() {
+  const root = document.documentElement;
+  if (document.fullscreenElement) {
+    return document.exitFullscreen().then(() => true, () => false);
+  }
+  if (!root.requestFullscreen) return Promise.resolve(false);
+  return root.requestFullscreen().then(() => true, () => false);
+}
+
+// 教学幕布自己会暂停局面（读说明的时候不该有火星在跑），但只有"是教学按下的暂停"
+// 才由教学来解除 —— 玩家自己按了暂停之后打开教学，关掉教学不该把他的暂停顺手取消。
+let tutorialPaused = false;
+function showTutorial(on) {
+  el.tutorial.hidden = !on;
+  el.help.setAttribute('aria-expanded', String(!!on));
+  if (on) {
+    if (!app.paused) {
+      tutorialPaused = true;
+      setPaused(true);
+    }
+  } else if (tutorialPaused) {
+    tutorialPaused = false;
+    setPaused(false);
+  }
+}
+
 el.restart.addEventListener('click', restart);
+if (el.pause) el.pause.addEventListener('click', () => setPaused(!app.paused));
+if (el.mute) el.mute.addEventListener('click', () => save.setMuted(audio.toggle()));
+if (el.full) el.full.addEventListener('click', () => { toggleFullscreen(); });
+if (el.help) el.help.addEventListener('click', () => showTutorial(el.tutorial.hidden));
+if (el.tutorialOk) el.tutorialOk.addEventListener('click', () => showTutorial(false));
+if (el.resume) el.resume.addEventListener('click', () => setPaused(false));
+document.addEventListener('fullscreenchange', () => {
+  if (el.full) el.full.setAttribute('aria-pressed', String(!!document.fullscreenElement));
+});
+syncMuteButton();
 el.share.addEventListener('click', shareLink);
 el.again.addEventListener('click', restart);
 el.next.addEventListener('click', () => go(`#/c/${Math.min(campaignLength(), app.index + 1)}`));
@@ -402,15 +532,32 @@ const layoutCanvas = view.canvas || document.querySelector('canvas');
 if (layoutCanvas && typeof ResizeObserver === 'function') {
   new ResizeObserver(() => view.measure()).observe(layoutCanvas);
 }
+// 键盘是第二输入，不是可选项：Enter/空格开局与暂停、P 暂停、R 重开、M 静音、
+// F 全屏、H 或 ? 玩法说明。Esc 优先关教学幕布，其次才关过关幕布。
 window.addEventListener('keydown', (ev) => {
   if (ev.metaKey || ev.ctrlKey || ev.altKey) return;
+  const tag = ev.target && ev.target.tagName;
+  if (tag === 'INPUT' || tag === 'TEXTAREA') return;
   const k = ev.key.toLowerCase();
-  if (k === 'escape' && !el.curtain.hidden) el.curtain.hidden = true;
+  if (k === 'escape') {
+    if (!el.tutorial.hidden) showTutorial(false);
+    else if (!el.curtain.hidden) el.curtain.hidden = true;
+    else if (app.paused) setPaused(false);
+  } else if (k === 'enter' || k === ' ') {
+    ev.preventDefault();
+    if (!el.tutorial.hidden) showTutorial(false);
+    else if (el.curtain.hidden) setPaused(!app.paused);
+    else el.next.click();
+  } else if (k === 'p') setPaused(!app.paused);
   else if (k === 'u') el.undo.click();
-  else if (k === 'h') el.hint.click();
+  else if (k === 'h' || ev.key === '?') showTutorial(el.tutorial.hidden);
   else if (k === 'r') el.restart.click();
+  else if (k === 'm') save.setMuted(audio.toggle());
+  else if (k === 'f') toggleFullscreen();
 });
 
+applyMotionPref();
+app.startedAt = Date.now();
 view.start();
 // Deliberately not paused on visibilitychange: the win card and the hint pulse are driven
 // from the same loop, and a tab that reports itself hidden (headless Chrome does) must
@@ -427,7 +574,9 @@ window.matchwork = {
   get state() {
     const g = app.game;
     const lot = app.lot;
+    const st = app.game && app.game.solved() ? 'solved' : app.paused ? 'paused' : 'playing';
     return {
+      state: st,
       mode: app.mode,
       label: app.label,
       id: lot && lot.id,
@@ -454,8 +603,32 @@ window.matchwork = {
       badRows: badRows.length,
       unsound: unsound.length,
       volatile: save.isVolatile(),
+      paused: app.paused,
+      muted: audio.muted(),
+      fullscreen: !!document.fullscreenElement,
+      tutorial: !el.tutorial.hidden,
+      reducedMotion: !!(motionMq && motionMq.matches),
+      ticks: view.animState().ticks,
+      simClock: view.animState().clock,
+      sparks: view.animState().live,
+      artFelt: view.animState().hasFelt,
+      artEmber: view.animState().hasEmber,
+      elapsedMs: app.startedAt ? Date.now() - app.startedAt : 0,
     };
   },
+  // 音频与动画的原始读数：静音到底是不是真挂了上下文、暂停到底有没有冻住模拟，
+  // 只有这两份读数能证明，光看按钮上的 aria-pressed 是看不出来的。
+  get audio() { return audio.state(); },
+  get anim() { return view.animState(); },
+  pause() { return setPaused(true); },
+  resume() { return setPaused(false); },
+  togglePause() { return setPaused(!app.paused); },
+  setMuted(v) { return save.setMuted(audio.setMuted(!!v)); },
+  toggleMute() { return save.setMuted(audio.toggle()); },
+  toggleFullscreen() { return toggleFullscreen(); },
+  showTutorial(v) { showTutorial(v === undefined ? true : !!v); return !el.tutorial.hidden; },
+  // 只给探针：撒一把火星并回报模拟读数，用来验"同一模拟时间在不同帧率下走多少步"。
+  sparks(n = 20) { return view.sparksAtCenter(n, 1.4); },
   get pool() { return poolStats(); },
   get store() { return save.snapshot(); },
   campaign() { return campaign().map((l) => l.id); },

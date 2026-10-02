@@ -78,7 +78,7 @@ test('storage: a real window round-trips through one key of plain JSON', () => {
   eq(parsed.version, 1);
   eq(parsed.records['lot-3'].best, { moves: 1, hints: 0 });
   eq(parsed.unlocked, 4);
-  eq(Object.keys(parsed).sort(), ['daily', 'records', 'stats', 'unlocked', 'version'],
+  eq(Object.keys(parsed).sort(), ['daily', 'prefs', 'records', 'stats', 'unlocked', 'version'],
     'the save grew a field nobody asked for');
   // The module cache and the disk are two different things: forget the cache and the data has
   // to come back out of the store, byte for byte.
@@ -319,8 +319,9 @@ test('storage: one key, one version, no second store anywhere', () => {
 
 test('storage: the module exposes nothing the shell does not call', () => {
   const exported = Object.keys(save).sort();
-  eq(exported, ['_forget', 'bump', 'dailyOf', 'isVolatile', 'key', 'load', 'markDaily', 'recordFor',
-    'reset', 'solve', 'solvedIds', 'snapshot', 'stats', 'unlockTo', 'unlocked'].sort(),
+  eq(exported, ['_forget', 'bump', 'dailyOf', 'isVolatile', 'key', 'load', 'markDaily', 'muted',
+    'recordFor', 'reset', 'setMuted', 'solve', 'solvedIds', 'snapshot', 'stats', 'unlockTo',
+    'unlocked'].sort(),
     `the save module exports ${JSON.stringify(exported)}`);
 });
 

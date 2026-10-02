@@ -4,12 +4,14 @@
 // (off, on) segment pair. js/core/board.js is the only place that says whether that pair is
 // a legal 搬, so a rendering bug can never invent a rule.
 //
-// Everything is drawn: the matches, the digits, the operator stars, the felt they lie on.
-// There is no image asset in this repo, and the matchstick endpoints are exposed through
-// `segmentEnds()` so a real mouse event — or tools/playtest.mjs driving one — can press the
-// end of a specific stick instead of guessing at a grid cell.
+// 火柴、数字、运算符星位都是现画的；台面毛毡与余烬是 assets/ 下真实烤出来的位图
+// （assets/gen/make_art.py 生成，运行时由 setArt() 注入）。拿不到图的时候退回纯色 ——
+// 图是表现，不是规则，缺图不该让版面画不出来。
+// 火柴两端通过 `segmentEnds()` 暴露出去，所以真实鼠标事件 —— 或 tools/playtest.mjs 驱动的
+// 一次按下 —— 按的是某一根的具体端头，而不是猜某个格子。
 
 import { isLit, T_DIGIT, T_EQUALS } from './core/board.js';
+import { createAnim } from './core/anim.js';
 
 const PAD = 26;
 const MATCH = 0.11;         // match thickness, in units of one digit width
@@ -53,6 +55,12 @@ export function createView(canvas, { onPick, onCommit, onRelease } = {}) {
   let badSeg = null; // { i, until }
   let raf = 0;
   let last = 0;
+  // 一切随时间变化的东西都归 anim：模拟时钟、余烬粒子、reduce-motion 与暂停。
+  // view 自己不留第二套时钟，否则"暂停后还在动"这种 bug 会有两个产地。
+  const anim = createAnim();
+  let art = { felt: null, ember: null };
+  let feltPattern = null;
+  let paused = false;
 
   // --------------------------------------------------------------------------
   // Geometry: cell -> pixels, once per resize.
@@ -143,7 +151,7 @@ export function createView(canvas, { onPick, onCommit, onRelease } = {}) {
   // --------------------------------------------------------------------------
 
   function down(ev) {
-    if (!game) return;
+    if (!game || paused) return;
     const p = localPoint(ev);
     const picked = game.picked();
     // Tap-then-tap: a match already held by a first tap lands on whatever dark slot this
@@ -171,7 +179,7 @@ export function createView(canvas, { onPick, onCommit, onRelease } = {}) {
     const seg = game.shape.segments[i];
     const held = onPick ? onPick(i, seg) : false;
     if (!held) {
-      badSeg = { i, until: performance.now() + 700 };
+      badSeg = { i, until: anim.now() + 0.7 };
       if (onRelease) onRelease(i);
       draw();
       ev.preventDefault();
@@ -219,7 +227,7 @@ export function createView(canvas, { onPick, onCommit, onRelease } = {}) {
 
   function drawFelt() {
     const { vw, vh } = geom;
-    ctx.fillStyle = FELT;
+    ctx.save();
     ctx.beginPath();
     const r = 14;
     ctx.moveTo(r, 0);
@@ -228,7 +236,17 @@ export function createView(canvas, { onPick, onCommit, onRelease } = {}) {
     ctx.arcTo(0, vh, 0, 0, r);
     ctx.arcTo(0, 0, vw, 0, r);
     ctx.closePath();
-    ctx.fill();
+    ctx.clip();
+    ctx.fillStyle = FELT;
+    ctx.fillRect(0, 0, vw, vh);
+    if (feltPattern) {
+      // 纹理是 256px 可平铺的毛毡（tileable_noise 取址回绕，接缝看不出来），铺满整块台面。
+      ctx.globalAlpha = 0.92;
+      ctx.fillStyle = feltPattern;
+      ctx.fillRect(0, 0, vw, vh);
+      ctx.globalAlpha = 1;
+    }
+    ctx.restore();
   }
 
   function drawMatch(a, b, { color = STICK, head = HEAD_A, lift = 0, ghost = false } = {}) {
@@ -274,13 +292,14 @@ export function createView(canvas, { onPick, onCommit, onRelease } = {}) {
     ctx.restore();
   }
 
-  function pulse(now, until) {
-    const left = Math.max(0, until - now) / 700;
-    return 0.45 + 0.55 * Math.abs(Math.sin(now / 160)) * Math.max(0.2, left);
+  // 脉冲读模拟时钟（anim.now()），不读 performance.now()：暂停时提示与拒绝的红闪要停在
+  // 原地，而不是在幕布后面自己淡完。reduce-motion 下 anim.pulse 返回常量，不抖。
+  function pulse(until, span = 0.7) {
+    return anim.pulse(until, span);
   }
 
   function draw() {
-    const now = typeof performance !== 'undefined' ? performance.now() : Date.now();
+    const now = anim.now();
     const { vw, vh } = geom;
     ctx.clearRect(0, 0, vw, vh);
     drawFelt();
@@ -311,7 +330,7 @@ export function createView(canvas, { onPick, onCommit, onRelease } = {}) {
       let color = isPick ? HELD : STICK;
       if (badSeg && badSeg.i === seg.i && now < badSeg.until) {
         color = BAD;
-        ctx.globalAlpha = pulse(now, badSeg.until);
+        ctx.globalAlpha = pulse(badSeg.until);
       }
       drawMatch(p.a, p.b, { color, head: isPick ? '#e0a63c' : HEAD_A, lift: isPick });
       ctx.globalAlpha = 1;
@@ -323,7 +342,7 @@ export function createView(canvas, { onPick, onCommit, onRelease } = {}) {
         if (!p) continue;
         ctx.save();
         ctx.strokeStyle = HINT;
-        ctx.globalAlpha = pulse(now, hintPair.until);
+        ctx.globalAlpha = pulse(hintPair.until, 2.8);
         ctx.lineWidth = Math.max(3, geom.unit * 0.18);
         ctx.beginPath();
         ctx.moveTo(p.a.x, p.a.y);
@@ -343,14 +362,22 @@ export function createView(canvas, { onPick, onCommit, onRelease } = {}) {
         { color: HELD, head: '#e0a63c', lift: true, ghost: false },
       );
     }
+    // 6. 余烬：一搬落地撒的那一把，画在最上层。
+    anim.draw(ctx, art.ember);
   }
 
   function frame(now) {
     raf = requestAnimationFrame(frame);
+    // 帧间隔只喂累加器：模拟按固定步长前进，30Hz 与 120Hz 跑同一段模拟时间走同样多的步。
+    const dt = last ? Math.min(0.25, (now - last) / 1000) : 0;
     last = now;
-    // Repaint only while something is actually animating: a held match, a hint pulse, a
-    // refusal flash. An idle board is a static image and does not need a loop burning CPU.
-    if (drag || (hintPair && now < hintPair.until) || (badSeg && now < badSeg.until)) draw();
+    anim.advance(dt);
+    const clock = anim.now();
+    // 只在真的有东西在动时重绘：静止的版面是一张静照，不该烧 CPU。暂停时连重绘都省了，
+    // 因为模拟时钟已经冻住，画一百遍也是同一帧。
+    if (paused) return;
+    if (drag || anim.live() || (hintPair && clock < hintPair.until)
+      || (badSeg && clock < badSeg.until)) draw();
   }
 
   canvas.addEventListener('pointerdown', down);
@@ -364,7 +391,35 @@ export function createView(canvas, { onPick, onCommit, onRelease } = {}) {
       drag = null;
       hintPair = null;
       badSeg = null;
+      // 换题与重开都从这里过：模拟时钟、粒子、暂停标记一起清，上一局的火星不许飘到这一局。
+      anim.reset();
+      paused = false;
       measure();
+    },
+    setArt(next) {
+      art = { felt: next && next.felt ? next.felt : null, ember: next && next.ember ? next.ember : null };
+      feltPattern = art.felt && ctx.createPattern ? ctx.createPattern(art.felt, 'repeat') : null;
+      draw();
+    },
+    setPaused(v) {
+      paused = !!v;
+      if (paused && drag) up(null);   // 暂停时手上的那根放回原处：不花搬数
+      draw();
+      return paused;
+    },
+    isPaused() { return paused; },
+    setReducedMotion(v) { anim.setReducedMotion(v); },
+    // 把火星撒在某一格的中点：main.js 在一次搬运落地、或过关那一刻调用。
+    sparksAt(segIdx, count = 12, power = 1) {
+      const p = segPoints(segIdx);
+      if (!p) return 0;
+      return anim.emit((p.a.x + p.b.x) / 2, (p.a.y + p.b.y) / 2, count, { power });
+    },
+    sparksAtCenter(count = 26, power = 1.4) {
+      return anim.emit(geom.vw / 2, geom.vh / 2, count, { power });
+    },
+    animState() {
+      return { ...anim.digest(), paused, reduced: anim.reducedMotion(), hasFelt: !!feltPattern, hasEmber: !!art.ember };
     },
     detach() {
       game = null;
@@ -396,11 +451,11 @@ export function createView(canvas, { onPick, onCommit, onRelease } = {}) {
       return segAt(clientX - box.left, clientY - box.top, null);
     },
     showHint(off, on) {
-      hintPair = { off, on, until: performance.now() + 2800 };
+      hintPair = { off, on, until: anim.now() + 2.8 };
       draw();
     },
     flashBad(segIdx) {
-      badSeg = { i: segIdx, until: performance.now() + 700 };
+      badSeg = { i: segIdx, until: anim.now() + 0.7 };
       draw();
     },
     start() {
