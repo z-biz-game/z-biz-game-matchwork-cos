@@ -52,6 +52,14 @@ export function createView(canvas, { onPick, onCommit, onRelease } = {}) {
   let hintPair = null; // { off, on, until }
   let badSeg = null; // { i, until }
   let raf = 0;
+
+  // ---- 减弱动效（prefers-reduced-motion）----
+  // pulse() = 0.45 + 0.55 * |sin(now / 160)| * 衰减 —— 一段 0.5s 周期的明暗呼吸，
+  // 它同时喂给两处 globalAlpha：刚被拒的那一段线（BAD 红）和提示那一对（HINT 绿影）。
+  // 判据：呼吸只是叠在上面的明暗，两处的**颜色与形状都另有出处** —— 红色是"刚才这一段
+  // 连错了"、绿影是"该接这一对"，都不由 alpha 承载。所以减弱动效下把 alpha 钉成一个
+  // 恒定值 0.75：照样看得见、看得清，只是不再一明一暗。与 ferry-cos / hashi 同口径。
+  let reduceMotion = false;
   let last = 0;
 
   // --------------------------------------------------------------------------
@@ -275,6 +283,7 @@ export function createView(canvas, { onPick, onCommit, onRelease } = {}) {
   }
 
   function pulse(now, until) {
+    if (reduceMotion) return 0.75;   // 恒定不透明度：红与绿照样在，只是不再一明一暗
     const left = Math.max(0, until - now) / 700;
     return 0.45 + 0.55 * Math.abs(Math.sin(now / 160)) * Math.max(0.2, left);
   }
@@ -359,6 +368,16 @@ export function createView(canvas, { onPick, onCommit, onRelease } = {}) {
   canvas.addEventListener('pointercancel', up);
 
   return {
+    // The gate the runtime pref flip lands on: idempotent, repaints so the highlight settles on
+    // the same frame the setting changes rather than at the next repaint.
+    setReduceMotion(v) {
+      const on = !!v;
+      if (on === reduceMotion) return reduceMotion;
+      reduceMotion = on;
+      if (reduceMotion) draw();
+      return reduceMotion;
+    },
+    isReducedMotion: () => reduceMotion,
     attach(next) {
       game = next;
       drag = null;
