@@ -56,7 +56,7 @@ js/view.js          像素与手势：画火柴、跟随指针、把 client 坐�
 js/main.js          DOM、路由、存档、成绩卡，并挂出 window.matchwork 测试钩子
 js/data/lots.js     60 行烘焙题池 + BAKE 报告（构建期产物，签进仓库）
 test/*.test.mjs     6 套 node 断言（tools/harness.mjs 打印 rows: N fail: N）
-tools/{bake,playtest}.mjs tools/verify.sh / tools/assemble-site / tools/deploy-set / tools/deploy-set-selftest
+tools/{bake,playtest}.mjs tools/verify.sh
 ```
 
 `js/core/*` 里不出现 `document.`/`window.`（`storage.js` 是唯一例外：它守卫 localStorage，

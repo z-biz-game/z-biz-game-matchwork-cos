@@ -203,7 +203,7 @@ wait $WD 2>/dev/null
 cleanup            # the real kill happens here, so the audit below is not looking at our own PIDs
 # Reaping can lag a killed process by a moment; bounded poll, then report what is really left.
 for i in $(seq 1 20); do
-  LEFT=$(pgrep -f "remote-debugging-port=$CDP_PORT" 2>/dev/null | wc -l | tr -d ' ')
+  LEFT=$(ps -Ao command= | awk -v p="${CDP_PORT}" 'index($0, "remote-debugging-port=" p) && !/--type=/' | wc -l | tr -d ' ')  # port concatenated inside awk: the -v needle would otherwise match this very pipeline
   LEFT_SRV=$(pgrep -f "server.cjs $WEB_PORT" 2>/dev/null | wc -l | tr -d ' ')
   [ "$LEFT" = "0" ] && [ "$LEFT_SRV" = "0" ] && break
   sleep 0.25
