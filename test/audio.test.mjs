@@ -87,6 +87,51 @@ test('audio: reset 停掉在响的尾音并清零计数（重开不余音）', (
   eq(a.muted(), false, 'reset 把玩家的静音选择改掉了');
 });
 
+
+// 暂停与静音是两套账：暂停压住的是"临时静音"，玩家按的那一下才是偏好。
+// 合成一个字段时（2026-10-05 之前的写法）main.js 的恢复判据 `if (!audio.muted())` 读的正是
+// 暂停自己设的那个值，于是 P 一次就永久没声音。下面三条把两套账钉死。
+test('audio: 暂停的临时静音不吃掉偏好，恢复必须真的回音', () => {
+  const log = fakeAudio();
+  const a = createAudio();
+  eq(a.play('drop'), true, 'precondition: 开局该出声');
+  const osc = log.osc;
+  eq(a.setDucked(true), true, '暂停没有把音频压住');
+  ok(log.suspend >= 1, '暂停没有挂起上下文（只挡住 draw 不算暂停）');
+  eq(a.play('drop'), false, '暂停期间还出了声');
+  eq(log.osc, osc, '暂停期间还在创建振荡器');
+  eq(a.setDucked(false), false, '恢复之后音频还压着（就是那个按一次 P 永久静音的缺陷）');
+  ok(log.resume >= 1, '恢复没有 resume 上下文');
+  eq(a.play('drop'), true, '恢复之后还是不响');
+  eq(log.osc, osc + 1, '恢复之后那一响没有真的建振荡器');
+  eq(a.preference(), false, '暂停把玩家的偏好改掉了');
+});
+
+test('audio: 玩家本来就静音时，暂停与恢复都不许替他打开声音', () => {
+  const log = fakeAudio();
+  const a = createAudio({ initialMuted: true });
+  a.unlock();
+  eq(a.setDucked(true), true);
+  eq(a.setDucked(false), true, '恢复把玩家的静音解开了——那一下不是玩家按的');
+  eq(a.play('drop'), false, '偏好静音中还出了声');
+  eq(log.osc, 0, '偏好静音中还是建了振荡器');
+});
+
+test('audio: 暂停期间按静音只改偏好，幕布后面不许放开声音', () => {
+  const log = fakeAudio();
+  const a = createAudio();
+  a.play('drop');
+  a.setDucked(true);
+  const resumes = log.resume;
+  const suspends = log.suspend;
+  a.toggle();                                  // 玩家在幕布后按静音：偏好从"不静音"翻成"静音"
+  eq(a.preference(), true, 'toggle 没有改到偏好');
+  eq(a.muted(), true, '生效值该还是静音');
+  eq(a.play('pick'), false, '暂停期间按了静音反倒出声');
+  eq(log.resume, resumes, '暂停中的静音操作把上下文放开了（幕布后面会漏声）');
+  eq(log.suspend, suspends, '已经挂起的上下文被重复挂起');
+});
+
 test('audio: 没有 AudioContext 的环境（file://、旧浏览器）不炸', () => {
   globalThis.window = {};
   const a = createAudio();

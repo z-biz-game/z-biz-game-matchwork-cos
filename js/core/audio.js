@@ -6,6 +6,14 @@
 //   2) 静音期间一个新振荡器都不创建。这条从外面看得见：`voices` 计数器在静音时按十次
 //      play() 之后必须一动不动（test 与 window.matchwork.audio 都读得到）。
 //
+// 生效的静音值有**两个来源**，必须分开，否则它们会互相踩：
+//   userMuted —— 玩家按下的那个开关，唯一能写进存档的值；
+//   ducked    —— 暂停之类的临时静音，不许覆盖玩家的选择。
+// 合成一个字段时"暂停静音、恢复还原"就写不出正确判据：早先 main.js 用
+// `if (!audio.muted()) audio.setMuted(save.muted())` 还原，而 muted() 在暂停期间恒为 true
+// （正是暂停自己设的），那次还原永远不执行 —— 玩家只按了一下 P，整局再也没声音，
+// 按钮还显示"已静音"。实测见 test/audio.test.mjs。
+//
 // AudioContext 只在第一次真实手势里建：浏览器不允许在 load 之前就允许声音，Electron 的
 // file:// 与 node（load_sweep 的桩环境）里干脆没有这个类，所以这里全部走惰性 + 判空。
 
@@ -19,10 +27,23 @@ const TONE = {
 export function createAudio({ initialMuted = false, onChange = null } = {}) {
   let ctx = null;
   let master = null;
-  let muted = !!initialMuted;
+  let userMuted = !!initialMuted;   // 玩家的选择：唯一会被写进存档的那一个
+  let ducked = false;               // 暂停造成的临时静音：还原时按玩家的偏好落地
+  const muted = () => userMuted || ducked;
   let voices = 0;      // 成功创建的振荡器数（静音时永不加）
   let refused = 0;     // 因静音/无上下文而被挡下的 play 次数
   const live = new Set();
+
+  // 挂起/恢复的是图本身。两次都带 catch：Safari 在页面隐藏时会拒绝 resume。
+  function applyMute() {
+    if (!ctx) { report(); return; }
+    if (muted()) {
+      if (ctx.state !== 'suspended') ctx.suspend().then(report, report);
+      else report();
+    } else if (ctx.state !== 'running') {
+      ctx.resume().then(report, report);
+    } else report();
+  }
 
   function AC() {
     return typeof window !== 'undefined' && (window.AudioContext || window.webkitAudioContext);
@@ -37,7 +58,7 @@ export function createAudio({ initialMuted = false, onChange = null } = {}) {
       master = ctx.createGain();
       master.gain.value = 0.9;
       master.connect(ctx.destination);
-      if (muted) ctx.suspend();
+      if (muted()) ctx.suspend();
     } catch (err) {
       ctx = null;
       master = null;
@@ -46,20 +67,20 @@ export function createAudio({ initialMuted = false, onChange = null } = {}) {
   }
 
   function report() {
-    if (onChange) onChange({ muted, voices, refused, ctx: ctx ? ctx.state : 'none' });
+    if (onChange) onChange({ muted: muted(), userMuted, ducked, voices, refused, ctx: ctx ? ctx.state : 'none' });
   }
 
   return {
     // 只有真实手势能走到这里（pointerdown / keydown / click），所以不在模块加载时碰音频设备。
     unlock() {
       const c = ensure();
-      if (c && !muted && c.state === 'suspended') c.resume().then(report, () => {});
+      if (c && !muted() && c.state === 'suspended') c.resume().then(report, () => {});
       return !!c;
     },
     play(kind = 'drop') {
       const t = TONE[kind];
       if (!t) return false;
-      if (muted) { refused += 1; report(); return false; }
+      if (muted()) { refused += 1; report(); return false; }
       const c = ensure();
       if (!c) { refused += 1; report(); return false; }
       if (c.state === 'suspended') c.resume().then(() => {}, () => {});
@@ -85,20 +106,22 @@ export function createAudio({ initialMuted = false, onChange = null } = {}) {
       report();
       return true;
     },
+    // 玩家的那一下开关。写的是偏好，生效值还要看有没有被暂停压住。
     setMuted(v) {
-      muted = !!v;
-      if (!ctx) { report(); return muted; }
-      // 挂起/恢复的是图本身。两次都带 catch：Safari 在页面隐藏时会拒绝 resume。
-      if (muted) {
-        if (ctx.state !== 'suspended') ctx.suspend().then(report, report);
-        else report();
-      } else if (ctx.state !== 'running') {
-        ctx.resume().then(report, report);
-      } else report();
-      return muted;
+      userMuted = !!v;
+      applyMute();
+      return muted();
     },
-    toggle() { return this.setMuted(!muted); },
-    muted() { return muted; },
+    // 暂停这类"临时压住"。不许把偏好改掉：P 一下再 P 回来，声音必须原样回来。
+    setDucked(v) {
+      ducked = !!v;
+      applyMute();
+      return muted();
+    },
+    toggle() { return this.setMuted(!userMuted); },
+    muted() { return muted(); },
+    preference() { return userMuted; },
+    ducked() { return ducked; },
     // 重开要把上一局还在响的尾音一起收掉，不然"重开重置一切"少一条尾巴。
     stopAll() {
       for (const rec of live) {
@@ -107,7 +130,7 @@ export function createAudio({ initialMuted = false, onChange = null } = {}) {
       live.clear();
     },
     state() {
-      return { muted, voices, refused, live: live.size, ctx: ctx ? ctx.state : 'none' };
+      return { muted: muted(), userMuted, ducked, voices, refused, live: live.size, ctx: ctx ? ctx.state : 'none' };
     },
     reset() {
       this.stopAll();

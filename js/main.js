@@ -109,7 +109,9 @@ window.addEventListener('keydown', unlockAudio, true);
 
 function syncMuteButton() {
   if (!el.mute) return;
-  const m = audio.muted();
+  // 读偏好而不是生效值：暂停把声音临时压住时，按钮不该跟着说"已静音"——玩家没按过它，
+  // 而它恢复的时候声音会自己回来（生效值由 audio.muted() 给出，探针读得到）。
+  const m = audio.preference();
   el.mute.setAttribute('aria-pressed', String(m));
   el.mute.textContent = m ? '已静音' : '静音';
 }
@@ -454,6 +456,19 @@ function restart() {
   say('回到最初那副摆法');
 }
 
+// 玩家可见的那一下静音：写偏好、落存档，生效值还要看是不是被暂停压着。
+function toggleMute() {
+  audio.setMuted(!audio.preference());
+  save.setMuted(audio.preference());
+  return audio.preference();
+}
+
+function setMutedPref(v) {
+  audio.setMuted(!!v);
+  save.setMuted(audio.preference());
+  return audio.preference();
+}
+
 function setPaused(next) {
   const want = !!next;
   if (want === app.paused) return app.paused;
@@ -463,8 +478,9 @@ function setPaused(next) {
     el.pause.setAttribute('aria-pressed', String(app.paused));
     el.pause.textContent = app.paused ? '继续' : '暂停';
   }
-  // 暂停同时挂起音频：一个还在响的上下文不算暂停。静音时不动它，别把玩家的选择改掉。
-  if (!audio.muted()) audio.setMuted(app.paused ? true : save.muted());
+  // 暂停把音频临时压住：一个还在响的上下文不算暂停。恢复时按玩家的偏好落地，
+  // 而不是把"暂停造成的静音"当成玩家的选择留在图上。
+  audio.setDucked(app.paused);
   return app.paused;
 }
 
@@ -496,7 +512,7 @@ function showTutorial(on) {
 
 el.restart.addEventListener('click', restart);
 if (el.pause) el.pause.addEventListener('click', () => setPaused(!app.paused));
-if (el.mute) el.mute.addEventListener('click', () => save.setMuted(audio.toggle()));
+if (el.mute) el.mute.addEventListener('click', toggleMute);
 if (el.full) el.full.addEventListener('click', () => { toggleFullscreen(); });
 if (el.help) el.help.addEventListener('click', () => showTutorial(el.tutorial.hidden));
 if (el.tutorialOk) el.tutorialOk.addEventListener('click', () => showTutorial(false));
@@ -556,7 +572,7 @@ window.addEventListener('keydown', (ev) => {
   else if (k === 'u') el.undo.click();
   else if (k === 'h' || ev.key === '?') showTutorial(el.tutorial.hidden);
   else if (k === 'r') el.restart.click();
-  else if (k === 'm') save.setMuted(audio.toggle());
+  else if (k === 'm') toggleMute();
   else if (k === 'f') toggleFullscreen();
 });
 
@@ -609,6 +625,8 @@ window.matchwork = {
       volatile: save.isVolatile(),
       paused: app.paused,
       muted: audio.muted(),
+      userMuted: audio.preference(),
+      duckedByPause: audio.ducked(),
       fullscreen: !!document.fullscreenElement,
       tutorial: !el.tutorial.hidden,
       reducedMotion: !!(motionMq && motionMq.matches),
@@ -627,8 +645,8 @@ window.matchwork = {
   pause() { return setPaused(true); },
   resume() { return setPaused(false); },
   togglePause() { return setPaused(!app.paused); },
-  setMuted(v) { return save.setMuted(audio.setMuted(!!v)); },
-  toggleMute() { return save.setMuted(audio.toggle()); },
+  setMuted(v) { return setMutedPref(v); },
+  toggleMute() { return toggleMute(); },
   toggleFullscreen() { return toggleFullscreen(); },
   showTutorial(v) { showTutorial(v === undefined ? true : !!v); return !el.tutorial.hidden; },
   // 只给探针：撒一把火星并回报模拟读数，用来验"同一模拟时间在不同帧率下走多少步"。
