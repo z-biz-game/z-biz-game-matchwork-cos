@@ -100,9 +100,11 @@ audio.setMuted(save.muted());
 function unlockAudio() {
   audio.unlock();
   window.removeEventListener('pointerdown', unlockAudio, true);
+  window.removeEventListener('touchstart', unlockAudio, true);
   window.removeEventListener('keydown', unlockAudio, true);
 }
 window.addEventListener('pointerdown', unlockAudio, true);
+window.addEventListener('touchstart', unlockAudio, true);
 window.addEventListener('keydown', unlockAudio, true);
 
 function syncMuteButton() {
@@ -538,7 +540,9 @@ window.addEventListener('keydown', (ev) => {
   if (ev.metaKey || ev.ctrlKey || ev.altKey) return;
   const tag = ev.target && ev.target.tagName;
   if (tag === 'INPUT' || tag === 'TEXTAREA') return;
-  const k = ev.key.toLowerCase();
+  // 合成事件、输入法与部分辅助技术会派发不带 key 的 keydown：这里不猜玩家按了什么，直接放行。
+  const k = String(ev.key || '').toLowerCase();
+  if (!k) return;
   if (k === 'escape') {
     if (!el.tutorial.hidden) showTutorial(false);
     else if (!el.curtain.hidden) el.curtain.hidden = true;

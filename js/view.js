@@ -385,6 +385,25 @@ export function createView(canvas, { onPick, onCommit, onRelease } = {}) {
   canvas.addEventListener('pointerup', up);
   canvas.addEventListener('pointercancel', up);
 
+  // 回落路径只在拿不到 Pointer Events 时才挂上（iOS 13 之前的 Safari、部分 webview 只发
+  // touch/mouse）。这里只负责"从哪个载体取坐标"，换算仍然只有 localPoint 一处 ——
+  // 多一处换算是多一处"手机上点 A 打 B"的产地。
+  if (!('onpointerdown' in window)) {
+    const fromTouch = (ev, list) => {
+      const t = ev[list] && ev[list][0];
+      if (!t) return null;
+      return { clientX: t.clientX, clientY: t.clientY, pointerId: 0, preventDefault: () => ev.preventDefault() };
+    };
+    const fromMouse = (ev) => ({ clientX: ev.clientX, clientY: ev.clientY, pointerId: 0, preventDefault: () => ev.preventDefault() });
+    canvas.addEventListener('touchstart', (ev) => { const p = fromTouch(ev, 'touches'); if (p) down(p); }, { passive: false });
+    canvas.addEventListener('touchmove', (ev) => { const p = fromTouch(ev, 'touches'); if (p) move(p); }, { passive: false });
+    canvas.addEventListener('touchend', (ev) => { const p = fromTouch(ev, 'changedTouches'); if (p) up(p); }, { passive: false });
+    canvas.addEventListener('touchcancel', (ev) => { const p = fromTouch(ev, 'changedTouches'); if (p) up(p); }, { passive: false });
+    canvas.addEventListener('mousedown', (ev) => down(fromMouse(ev)));
+    canvas.addEventListener('mousemove', (ev) => move(fromMouse(ev)));
+    canvas.addEventListener('mouseup', (ev) => up(fromMouse(ev)));
+  }
+
   return {
     attach(next) {
       game = next;
@@ -403,6 +422,9 @@ export function createView(canvas, { onPick, onCommit, onRelease } = {}) {
     },
     setPaused(v) {
       paused = !!v;
+      // 暂停必须落到模拟层，不能只挡住 draw：只跳过渲染的话时钟照跑，
+      // 提示与拒绝的脉冲会在幕布后面自己淡完，幕布上"模拟时钟已停住"就成了假话。
+      anim.setPaused(paused);
       if (paused && drag) up(null);   // 暂停时手上的那根放回原处：不花搬数
       draw();
       return paused;
