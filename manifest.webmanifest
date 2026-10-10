@@ -1,37 +1,26 @@
 {
-  "name": "火柴等式 MATCHWORK",
+  "name": "火柴等式",
   "short_name": "火柴等式",
-  "description": "搬 N 根火柴让等式成立。每关的最少搬数由合法版面图上的完整穷举量出来，等号那两根锁死。无服务器，成绩只在本机。",
-  "id": "/z-biz-game-matchwork-cos/",
-  "start_url": "./",
-  "scope": "./",
+  "start_url": ".",
   "display": "standalone",
-  "display_override": ["standalone", "minimal-ui"],
-  "orientation": "any",
-  "lang": "zh-CN",
-  "dir": "ltr",
-  "background_color": "#141210",
-  "theme_color": "#141210",
-  "categories": ["games", "puzzle"],
+  "background_color": "#0a0a12",
+  "theme_color": "#0a0a12",
   "icons": [
-    { "src": "assets/icons/icon-192.png", "sizes": "192x192", "type": "image/png", "density": "1x" },
-    { "src": "assets/icons/icon-512.png", "sizes": "512x512", "type": "image/png", "density": "1x" },
-    { "src": "assets/icons/maskable-512.png", "sizes": "512x512", "type": "image/png", "purpose": "maskable" },
-    { "src": "assets/icons/apple-touch-icon.png", "sizes": "180x180", "type": "image/png" },
-    { "src": "assets/icons/icon-1024.png", "sizes": "1024x1024", "type": "image/png" }
-  ],
-  "shortcuts": [
     {
-      "name": "每日一题",
-      "short_name": "每日",
-      "url": "./#/daily",
-      "icons": [{ "src": "assets/icons/icon-96.png", "sizes": "96x96", "type": "image/png" }]
+      "src": "icons/icon-192.png",
+      "sizes": "192x192",
+      "type": "image/png"
     },
     {
-      "name": "随机关卡",
-      "short_name": "随机",
-      "url": "./#/random",
-      "icons": [{ "src": "assets/icons/icon-96.png", "sizes": "96x96", "type": "image/png" }]
+      "src": "icons/icon-512.png",
+      "sizes": "512x512",
+      "type": "image/png"
+    },
+    {
+      "src": "icons/icon-maskable-512.png",
+      "sizes": "512x512",
+      "type": "image/png",
+      "purpose": "maskable"
     }
   ]
 }

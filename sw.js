@@ -1,65 +1,56 @@
 'use strict';
-// 离线壳。只做 network-first，绝不做 cache-first。
+// 离线可用 + 永不被旧缓存钉住。
 //
-// 为什么：这个仓的入口是 `<script type="module">`，浏览器会替我拉一串 js/*.js。一旦
-// cache-first 把某次访问的模块钉在缓存里，下一次 index.html 更新就会拿新壳跑旧模块，
-// 那是没人写过的状态组合。所以网络能答就先让网络答，缓存只是断网时的救生圈 ——
-// 这也就是"地铁里第二次打开还能玩"的全部含义。
-//
-// 缓存名带版本；activate 删掉所有别的名字。改了不兼容的东西就把 VERSION 往上抬一位，
-// 这是唯一的清缓存动作，没有第二处需要记。
-const VERSION = 'matchwork-shell-v1';
+// 两条实测换来的口径：
+//   1) 一律 **网络优先**，命中网络才回填缓存。手工 VERSION + cache-first 的组合，
+//      发出去的 HTML 会配上上一版的 js/css，出一个"新界面配旧逻辑"的鬼状态，
+//      而且玩家自己无法恢复（只能等缓存过期）。
+//   2) 缓存名带版本号（activate 时清掉非本版的名字）。改版**不需要**同步 bump：
+//      同名文件重绘之后，网络优先这一条保证客户端下一次联网就拿到新字节。
+const VERSION = 'matchwork-cos-v1';
+const CACHE = `${VERSION}-shell`;
+const PRECACHE = ['index.html', 'manifest.webmanifest'];
 
-// 装的时候先把壳预置一遍，这样第一次进也能离线（addAll 是一个失败全体失败，
-// 所以这里逐条 catch：少一张图不该让整次 install 变红）。
-const SHELL = [
-  './',
-  './index.html',
-  './css/game.css',
-  './manifest.webmanifest',
-  './assets/icons/icon-192.png',
-  './assets/icons/icon-512.png',
-  './assets/textures/felt-256.png',
-  './assets/textures/ember-64.png',
-];
-
-self.addEventListener('install', (e) => {
-  e.waitUntil(
-    caches.open(VERSION)
-      .then((cache) => Promise.all(SHELL.map((u) => cache.add(u).catch(() => {}))))
-      .then(() => self.skipWaiting())
+self.addEventListener('install', (ev) => {
+  // 首屏两件套先抓下来：断网时至少能打开界面，而不是浏览器的错误页。
+  ev.waitUntil(
+    caches.open(CACHE).then((c) => c.addAll(PRECACHE).catch(() => {})).then(() => self.skipWaiting())
   );
 });
 
-self.addEventListener('activate', (e) => {
-  e.waitUntil(
-    caches.keys()
-      .then((keys) => Promise.all(keys.filter((k) => k !== VERSION).map((k) => caches.delete(k))))
+self.addEventListener('activate', (ev) => {
+  ev.waitUntil(
+    caches
+      .keys()
+      .then((keys) => Promise.all(keys.filter((k) => !k.startsWith(VERSION)).map((k) => caches.delete(k))))
       .then(() => self.clients.claim())
   );
 });
 
-self.addEventListener('fetch', (e) => {
-  const req = e.request;
+self.addEventListener('fetch', (ev) => {
+  const req = ev.request;
   if (req.method !== 'GET') return;
-  let url;
-  try {
-    url = new URL(req.url);
-  } catch (err) {
-    return;
-  }
-  // 只管同源：跨源的东西（字体、Electron 的 file:// 兄弟请求）不在我的版本控制里。
+  const url = new URL(req.url);
   if (url.origin !== self.location.origin) return;
-  e.respondWith(
+
+  ev.respondWith(
     fetch(req)
       .then((res) => {
         if (res && res.ok) {
           const copy = res.clone();
-          caches.open(VERSION).then((cache) => cache.put(req, copy));
+          caches.open(CACHE).then((c) => c.put(req, copy));
         }
         return res;
       })
-      .catch(() => caches.match(req).then((hit) => hit
-        || (req.mode === 'navigate' ? caches.match('./index.html') : Response.error())))
+      .catch(async () => {
+        const hit = await caches.match(req);
+        if (hit) return hit;
+        // 导航请求（地址栏/刷新/桌面图标）离线时回落到缓存的那份壳，不白屏。
+        if (req.mode === 'navigate') {
+          const shell = await caches.match('index.html');
+          if (shell) return shell;
+        }
+        return Response.error();
+      })
   );
 });

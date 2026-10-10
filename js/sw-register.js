@@ -1,11 +1,12 @@
 'use strict';
-// 注册 service worker。故意写成普通脚本（不是 module）：它必须在 file:// 下安静地什么都不做。
+// service worker 注册：只在 http/https 下做。
 //
-// Electron 走的是 `loadFile()`，协议是 file:，那时 navigator.serviceWorker 要么不存在、
-// 要么注册必败 —— 那是运行环境的形状，不是玩家的错，所以这里连协议一起判掉，
-// 剩下的一条 catch 只用来吃掉无痕窗口/旧 Safari 的拒绝，控制台不该见红。
+// file:// 直接打开（双击 index.html、或把仓库 zip 解开看）时 navigator.serviceWorker
+// 要么不存在、要么 register 必抛 SecurityError。那不是玩家的错，不该在控制台上留一条
+// 红字，更不该让后面真正该跑的 main.js 因为这条未捕获异常被中断。
 if ('serviceWorker' in navigator && /^https?:$/.test(location.protocol)) {
   window.addEventListener('load', () => {
-    navigator.serviceWorker.register('sw.js').catch(() => {});
+    // 相对 sw.js 而不是绝对 /sw.js：Pages 的项目站挂在 /<repo>/ 子路径下。
+    navigator.serviceWorker.register('sw.js', { scope: './' }).catch(() => {});
   });
 }
