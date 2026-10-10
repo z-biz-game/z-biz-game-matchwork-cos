@@ -726,23 +726,6 @@ function fsQuiet(p) {
 }
 
 // 返回 true=请求进入，false=请求退出，null=不支持（调用方据此禁用按钮）。
-function toggleFullscreen(root) {
-  const req = fsRequest(root);
-  if (!req) return null;
-  if (fsElement()) {
-    // 退出侧同样要兜底：老 Edge 是 msExitFullscreen；万一三者皆无就当无事发生，不抛。
-    const exit = document.exitFullscreen || document.webkitExitFullscreen || document.msExitFullscreen;
-    if (exit) fsQuiet(exit.call(document));
-    return false;
-  }
-  // 部分实现（如被 Permissions-Policy 挡住的 iframe）会同步抛，所以 catch 和 .catch 两头都要接。
-  try {
-    fsQuiet(req.call(root));
-  } catch (err) {
-    // 拒绝即降级：静默保持当前形态，不冒泡、不打断这一局的其余逻辑。
-  }
-  return true;
-}
 
 function bindFullscreen(btn) {
   const root = fsRoot();
