@@ -12,6 +12,10 @@ import {
   tierLabel, stats as poolStats, rejected, dateKey, auditProofs,
 } from './core/library.js';
 import { createView } from './view.js';
+// 听觉与触觉这两路反馈：视觉与数值之外，桌面上还该有"听得见"的一路。
+// 音频模块自己管手势解锁与真静音（suspend），这里只管把音接到引擎的判定上。
+import { audio } from './audio.js';
+import { haptics } from './haptics.js';
 
 const $ = (id) => document.getElementById(id);
 const el = {
@@ -32,6 +36,8 @@ const app = {
   day: null,
   refused: 0,
   drags: 0,
+  // 这一局赢过没有：通关声只响一次（见 finish()）。
+  won: false,
 };
 
 function clampIndex(n) {
@@ -101,6 +107,10 @@ function refuse(reason, segIdx) {
   app.refused++;
   save.bump('refused');
   say(`${reason}`, true);
+  // 引擎（core/game.js）拒了这一次：拿起不成的、搬不成的、退不回去的，全走这一条路，
+  // 所以"被拒"这一声只有一个落点，不会漏也不会重复。
+  audio.play('wrong');
+  haptics.wrong();
   if (segIdx !== undefined && segIdx !== null) view.flashBad(segIdx);
 }
 
@@ -109,6 +119,7 @@ function setGame(lot) {
   app.game = createGame(lot);
   app.refused = 0;
   app.drags = 0;
+  app.won = false;              // 上一局赢过不算数：这一局还没赢
   view.attach(app.game);
   el.curtain.hidden = true;
   el.equation.textContent = lot.text;
@@ -212,6 +223,11 @@ function render() {
 
 // The one place a move happens: a drag from the view, a tap-tap, and a test route played
 // through window.matchwork all arrive here.
+//
+// 声音接在**引擎的判定分支**上，不是接在"手指碰过屏幕"上：
+//   · core/game.js 的 apply() 收了这一次（res.ok）→ correct
+//   · apply() 拒了（res.ok 为假）→ refuse() 那一条路 → wrong
+//   · 这一步之后等式成立（game.solved()）→ win，而且只响这一次
 function commit(off, on) {
   const res = app.game.apply(off, on);
   if (!res.ok) {
@@ -225,9 +241,11 @@ function commit(off, on) {
   el.equation.textContent = showState(app.game.shape, app.game.state());
   if (app.game.solved()) {
     view.redraw();
-    finish();
+    finish();                      // win 在 finish 里响：这一步只出这一声
     return true;
   }
+  audio.play('correct');           // 引擎真的搬成了一步
+  haptics.correct();
   view.redraw();
   renderReadout();
   const left = app.lot.par - app.game.moves();
@@ -249,6 +267,12 @@ function finish() {
   if (!honest) {
     say('你的这一步序列没有让等式成立——这不是应该发生的，请刷新页面。', true);
     return;
+  }
+  // 通关只响一次：等式成立之后玩家还能继续搬，每搬一下都重播通关声是吵的。
+  if (!app.won) {
+    app.won = true;
+    audio.play('win');
+    haptics.correct();
   }
   const rec = save.solve(lot.id, { moves: gr.moves, hints: gr.hints, par: lot.par });
   if (app.day) save.markDaily(app.day, lot.id);
@@ -328,12 +352,14 @@ el.modes.addEventListener('click', (ev) => {
 
 el.undo.addEventListener('click', () => {
   if (app.game.undo()) {
+    audio.play('move');         // 盘面退了一步
+    haptics.tap();
     view.redraw();
     el.equation.textContent = showState(app.game.shape, app.game.state());
     renderReadout();
     say(app.game.moves() ? `退回一步，现在 ${app.game.moves()} 搬` : '回到最初那副摆法');
   } else {
-    refuse(app.game.refusal());
+    refuse(app.game.refusal());  // 没有可退的一步：引擎的拒收理由本身就是这一声
   }
 });
 
@@ -341,9 +367,13 @@ el.hint.addEventListener('click', () => {
   const h = app.game.hint();
   if (!h) {
     say('从当前这一步出发，穷举在预算内跑不完，所以不敢告诉你下一步——撤销或重开吧。', true);
+    audio.play('wrong');        // 引擎说它推不动了
+    haptics.wrong();
     return;
   }
   save.bump('hints');
+  audio.play('move');           // 提示：只说下一步，不代搬
+  haptics.tap();
   view.showHint(h.off, h.on);
   say(`提示：把 <b>${nameOf(h.off)}</b> 搬到 <b>${nameOf(h.on)}</b> ——这是某条最短解的第一步，之后还差 <b>${h.left - 1}</b> 搬`);
   renderReadout();
@@ -351,6 +381,9 @@ el.hint.addEventListener('click', () => {
 
 function restart() {
   app.game.restart();
+  app.won = false;            // 重开就是新的一局：通关声重新算一次
+  audio.play('move');
+  haptics.tap();
   view.attach(app.game);
   el.curtain.hidden = true;
   render();
@@ -612,3 +645,26 @@ if (motionQuery) {
 }
 window.matchwork.setReduceMotion = applyReduceMotion;
 window.matchwork.isReducedMotion = () => view.isReducedMotion();
+
+// ---- 音效开关（#btn-sound）----
+//
+// 静音走 `audio.setMuted(true)`，那是 `ctx.suspend()`：整个 AudioContext 挂起。
+// **不许**改成像"把 master.gain 拧到 0"那样 —— 只拧 gain 是假静音：节点照建、时钟照跑，
+// 取消静音之后还有一截尾巴在响。真正的静音必须是挂起整个上下文。
+//
+// 按钮找不到就不装（和全屏那一条同一条纪律）：留一串没人按的代码等于没做这个功能。
+(function bindSound() {
+  const btn = document.getElementById('btn-sound');
+  if (!btn) return;
+  function paint() {
+    const on = !audio.muted;
+    btn.setAttribute('aria-pressed', String(on));
+    btn.textContent = on ? '音效：开' : '音效：关';
+    btn.title = on ? '点击关闭音效' : '点击开启音效';
+  }
+  btn.addEventListener('click', () => {
+    audio.setMuted(!audio.muted);
+    paint();
+  });
+  paint();
+})();
