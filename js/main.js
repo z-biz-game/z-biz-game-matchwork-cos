@@ -13,6 +13,8 @@ import {
 } from './core/library.js';
 import { createView } from './view.js';
 import { createAudio } from './core/audio.js';
+// 触觉是第三路反馈：`navigator.vibrate` 在 iOS Safari 上不存在，模块自己会空操作。
+import { haptics } from './haptics.js';
 
 const $ = (id) => document.getElementById(id);
 const el = {
@@ -80,6 +82,7 @@ const view = createView(el.canvas, {
     if (!ok) refuse(app.game.refusal(), i);
     else {
       audio.play('pick');
+      haptics.tap();
       say(`拿起 <b>${nameOf(i)}</b> —— 拖到一个空位再松手`);
     }
     renderReadout();
@@ -170,6 +173,7 @@ function refuse(reason, segIdx) {
   save.bump('refused');
   say(`${reason}`, true);
   audio.play('refuse');
+  haptics.wrong();
   if (segIdx !== undefined && segIdx !== null) view.flashBad(segIdx);
 }
 
@@ -295,6 +299,7 @@ function commit(off, on) {
   app.drags++;
   save.bump('drags');
   audio.play('drop');
+  haptics.correct();   // 引擎真的接住了这一次拖放
   // 火星撒在落点那一格：reduce-motion 开着时 emit 自己返回 0，一把都不产生。
   view.sparksAt(on, 12, 1);
   el.equation.textContent = showState(app.game.shape, app.game.state());
@@ -325,6 +330,7 @@ function stars(n) {
 
 function finish() {
   audio.play('win');
+  haptics.correct();
   view.sparksAtCenter(30, 1.5);
   const lot = app.lot;
   const g = app.game;
